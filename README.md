@@ -1,32 +1,34 @@
-# React + TypeScript + Vite
+# Market Intel
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A deterministic, rule-based crypto market intelligence dashboard built on live Binance USDⓈ-M Futures data. No backend, no LLM, no social/news feeds, no wallet or trade-execution integration — everything is computed client-side from public market data.
 
-Currently, two official plugins are available:
+**Live:** https://dgamketelaars-star.github.io/crypto-market-intel/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## What it does
 
-## React Compiler
+- Streams live price, funding, open interest and candle data for the Top-20 USDⓈ-M Futures symbols (plus BTC and ETH) directly from Binance's public REST/WebSocket API.
+- Runs a layered intelligence pipeline (`src/intelligence/`) that reads market regime → higher-timeframe structure → trend/momentum/volume confirmation → volatility/derivatives/BTC-ETH context, and only then forms a coherent LONG/SHORT thesis — or explicitly concludes **no thesis** rather than forcing one.
+- Builds structure-first entry zones, stoplosses and targets from a valid thesis (never an arbitrary price-plus-ATR shortcut), classifies day-trade vs. swing-trade horizon as an input to planning (not a result of it), and computes an independent Signal Strength and Risk rating.
+- Tracks published setups through a full lifecycle (candidate → active → invalidated/completed/expired) and persists them locally in the browser.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Nothing here is a trading signal or financial advice — it's a transparent, explainable read of public market structure.
 
-## Expanding the Oxlint configuration
+## Architecture
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+- `src/services/binance/` — REST + WebSocket client for Binance USDⓈ-M Futures public endpoints.
+- `src/store/`, `src/analysis/` — live market-data store and the underlying indicator/structure calculations.
+- `src/intelligence/` — the evidence-synthesis and thesis-decision pipeline: regime classification, market structure (BOS/CHOCH/retest), trend/momentum/volume/volatility/derivatives/market-context evidence categories, the LONG/SHORT/NO-THESIS decision flow, and structure-first trade planning.
+- `src/setups/` — setup lifecycle state machine, persistence, and UI-facing types.
+- `src/components/` — the dashboard UI.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## Local development
+
+```bash
+npm install
+npm run dev      # start the dev server
+npm test         # run the test suite
+npm run build    # typecheck + production build
+npm run lint      # oxlint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Deployment to GitHub Pages happens automatically via `.github/workflows/deploy-pages.yml` on every push to `main`.

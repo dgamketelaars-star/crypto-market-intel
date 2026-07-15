@@ -2,6 +2,8 @@ import type {
   Candle,
   FundingData,
   FuturesSymbol,
+  LiquidationEvent,
+  LongShortRatioData,
   MarkPriceData,
   OpenInterestData,
   TickerData,
@@ -129,6 +131,36 @@ export function normalizeCandleRest(raw: unknown): Candle {
     volume: Number(raw[5]),
     closeTime: Number(raw[6]),
     isFinal: true,
+  };
+}
+
+export function normalizeLiquidationStream(raw: unknown): LiquidationEvent {
+  if (!isRecord(raw) || !isRecord(raw.o)) {
+    throw new Error('Invalid forceOrder stream payload');
+  }
+  const o = raw.o;
+  if (typeof o.s !== 'string') {
+    throw new Error('Invalid forceOrder stream payload');
+  }
+  return {
+    symbol: o.s,
+    side: o.S === 'BUY' ? 'BUY' : 'SELL',
+    price: Number(o.ap ?? o.p),
+    quantity: Number(o.q),
+    time: Number(o.T ?? raw.E),
+  };
+}
+
+export function normalizeLongShortRatioRest(raw: unknown): LongShortRatioData {
+  if (!isRecord(raw) || typeof raw.symbol !== 'string') {
+    throw new Error('Invalid longShortRatio payload');
+  }
+  return {
+    symbol: raw.symbol,
+    longShortRatio: Number(raw.longShortRatio),
+    longAccountPct: Number(raw.longAccount) * 100,
+    shortAccountPct: Number(raw.shortAccount) * 100,
+    time: Number(raw.timestamp),
   };
 }
 

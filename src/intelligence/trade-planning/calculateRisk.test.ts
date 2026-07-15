@@ -15,6 +15,8 @@ function baseInput(overrides: Partial<RiskInput> = {}): RiskInput {
     universeSize: 20,
     nearestTargetRewardToRisk: 3,
     priceVsEma200Pct: 5,
+    recentLiquidations: [],
+    sourceTimestamp: 1_000_000,
     ...overrides,
   };
 }
@@ -76,6 +78,32 @@ describe('calculateRisk', () => {
   it('flags a stop landing near a round number as a proxy stop-hunt risk', () => {
     const result = calculateRisk(baseInput({ invalidationPrice: 100.05 }));
     expect(result.factors.some((f) => f.toLowerCase().includes('round-number'))).toBe(true);
+  });
+
+  it('prefers a real liquidation cluster over the round-number proxy when recent liquidation data exists nearby', () => {
+    const result = calculateRisk(
+      baseInput({
+        invalidationPrice: 143.7,
+        sourceTimestamp: 1_000_000,
+        recentLiquidations: [
+          { symbol: 'BTCUSDT', side: 'SELL', price: 143.75, quantity: 4, time: 990_000 },
+          { symbol: 'BTCUSDT', side: 'SELL', price: 143.6, quantity: 3, time: 995_000 },
+        ],
+      }),
+    );
+    expect(result.factors.some((f) => f.toLowerCase().includes('real liquidation cluster'))).toBe(true);
+    expect(result.factors.some((f) => f.toLowerCase().includes('round-number'))).toBe(false);
+  });
+
+  it('ignores liquidations outside the lookback window when checking for a cluster near the stop', () => {
+    const result = calculateRisk(
+      baseInput({
+        invalidationPrice: 143.7,
+        sourceTimestamp: 10_000_000,
+        recentLiquidations: [{ symbol: 'BTCUSDT', side: 'SELL', price: 143.7, quantity: 10, time: 0 }],
+      }),
+    );
+    expect(result.factors.some((f) => f.toLowerCase().includes('real liquidation cluster'))).toBe(false);
   });
 
   it('compounds multiple simultaneous factors into a higher risk level than any single factor alone', () => {

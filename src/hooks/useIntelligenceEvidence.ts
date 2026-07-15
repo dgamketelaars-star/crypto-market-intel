@@ -41,6 +41,7 @@ export function useIntelligenceEvidence(symbol: string): IntelligencePipelineRes
     const analysis = analysisState.bySymbol[symbol];
     if (!symbolMarket?.ticker || !analysis) return null;
 
+    const now = Date.now();
     const synthesis = synthesizeEvidence({
       symbol,
       analysis,
@@ -50,7 +51,9 @@ export function useIntelligenceEvidence(symbol: string): IntelligencePipelineRes
       btcAnalysis: analysisState.bySymbol.BTCUSDT ?? null,
       ethAnalysis: analysisState.bySymbol.ETHUSDT ?? null,
       breadthBullishSharePct: computeBreadthBullishSharePct(analysisState.bySymbol),
-      now: Date.now(),
+      recentLiquidations: symbolMarket.recentLiquidations,
+      longShortRatio: symbolMarket.longShortRatio ?? null,
+      now,
     });
 
     const thesis = decideThesis(symbol, synthesis);
@@ -72,6 +75,8 @@ export function useIntelligenceEvidence(symbol: string): IntelligencePipelineRes
         quoteVolumeRank: analysis.volume.quoteVolumeRank,
         universeSize: analysis.volume.universeSize,
         priceVsEma200Pct: timeframe4h?.trend.priceVsEma200Pct ?? null,
+        recentLiquidations: symbolMarket.recentLiquidations,
+        now,
       });
     }
 

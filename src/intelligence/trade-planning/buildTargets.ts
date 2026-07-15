@@ -6,6 +6,7 @@ import { finalizeTargets } from '../../setups/levels/targetPortions';
 import type { SetupTarget, SetupTargetCandidate, TradeHorizon } from '../../setups/engine/types';
 import { INTEL_RULES } from '../rules';
 import type { ThesisDirection } from '../structure/entryLocation';
+import { buildVolumeProfile } from '../structure/volumeProfile';
 
 function targetDistanceFloor(horizon: TradeHorizon, atr1h: number | null, atr4h: number | null): number | null {
   if (horizon === 'DAY_TRADE') return atr1h !== null ? atr1h * INTEL_RULES.tradePlanning.horizon.dayTrade.minTargetAtr1hMult : null;
@@ -19,21 +20,41 @@ function isDegenerateRewardToRisk(rewardToRisk: number | null, stopDistance: num
   return stopDistance / relevantAtr < INTEL_RULES.tradePlanning.rrSanity.safeAtrRiskMult;
 }
 
-/** Zone candidates within this tolerance of each other are the same target, not two — keeps the plan from showing near-duplicate levels. */
-function mergeOverlappingZones(zones: { price: number; touches: number }[]): { price: number; touches: number }[] {
+interface ZoneCandidate {
+  price: number;
+  touches: number;
+  fromSwing: boolean;
+  fromVolumeProfile: boolean;
+}
+
+/** Zone candidates within this tolerance of each other are the same target, not two — keeps the plan from showing near-duplicate levels. A candidate found by both swing structure and volume profile is confluence, not a duplicate to discard. */
+function mergeOverlappingZones(zones: ZoneCandidate[]): ZoneCandidate[] {
   const tolerance = INTEL_RULES.tradePlanning.entryZoneTolerancePct / 100;
   const sorted = [...zones].sort((a, b) => a.price - b.price);
-  const merged: { price: number; touches: number }[] = [];
+  const merged: ZoneCandidate[] = [];
   for (const zone of sorted) {
     const last = merged[merged.length - 1];
     if (last && Math.abs(zone.price - last.price) / last.price <= tolerance) {
       last.touches += zone.touches;
+      last.fromSwing = last.fromSwing || zone.fromSwing;
+      last.fromVolumeProfile = last.fromVolumeProfile || zone.fromVolumeProfile;
       last.price = (last.price + zone.price) / 2;
     } else {
       merged.push({ ...zone });
     }
   }
   return merged;
+}
+
+function describeTargetZone(zone: ZoneCandidate, direction: ThesisDirection): string {
+  const sideLabel = direction === 'LONG' ? 'resistance' : 'support';
+  if (zone.fromSwing && zone.fromVolumeProfile) {
+    return `Structural ${sideLabel} zone at ${zone.price.toFixed(4)} (${zone.touches} touches), confirmed by volume-profile confluence.`;
+  }
+  if (zone.fromVolumeProfile) {
+    return `Volume-profile level (POC/value-area/high-volume-node) at ${zone.price.toFixed(4)}.`;
+  }
+  return `Structural ${sideLabel} zone at ${zone.price.toFixed(4)} (${zone.touches} touches).`;
 }
 
 /**
@@ -59,7 +80,21 @@ export function buildTargets(params: {
   const stopDistance = Math.abs(triggerPrice - invalidationPrice);
 
   const { supports, resistances } = findSupportResistanceZones(structuralCandles, triggerPrice);
-  const candidateZones = mergeOverlappingZones(direction === 'LONG' ? resistances : supports);
+  const swingCandidates: ZoneCandidate[] = (direction === 'LONG' ? resistances : supports).map((z) => ({
+    price: z.price,
+    touches: z.touches,
+    fromSwing: true,
+    fromVolumeProfile: false,
+  }));
+
+  const profile = buildVolumeProfile(structuralCandles, INTEL_RULES.volumeProfile.bucketCount);
+  const volumeProfileCandidates: ZoneCandidate[] = profile.sufficientData
+    ? (direction === 'LONG' ? [profile.poc, profile.valueAreaHigh, ...profile.highVolumeNodes] : [profile.poc, profile.valueAreaLow, ...profile.highVolumeNodes])
+        .filter((price) => (direction === 'LONG' ? price > triggerPrice : price < triggerPrice))
+        .map((price) => ({ price, touches: 1, fromSwing: false, fromVolumeProfile: true }))
+    : [];
+
+  const candidateZones = mergeOverlappingZones([...swingCandidates, ...volumeProfileCandidates]);
 
   const minDistance = targetDistanceFloor(horizon, atr1h, atr4h);
   if (minDistance === null) return [];
@@ -73,8 +108,8 @@ export function buildTargets(params: {
       return {
         price: zone.price,
         timeframe,
-        method: 'opposite-side-structural-zone',
-        explanation: `Structural ${direction === 'LONG' ? 'resistance' : 'support'} zone at ${zone.price.toFixed(4)} (${zone.touches} touches).`,
+        method: zone.fromVolumeProfile && !zone.fromSwing ? 'volume-profile-level' : 'opposite-side-structural-zone',
+        explanation: describeTargetZone(zone, direction),
         rewardToRisk,
         distance,
       };

@@ -1,5 +1,5 @@
 import type { SymbolAnalysis } from '../../analysis/engine/types';
-import type { Candle, CandleInterval } from '../../services/binance/types';
+import type { Candle, CandleInterval, LiquidationEvent, LongShortRatioData } from '../../services/binance/types';
 import { latestAdx } from '../../analysis/indicators/adx';
 import { classifyMarketRegime } from '../regime/classifyRegime';
 import type { MarketRegime, MarketRegimeResult } from '../regime/types';
@@ -25,6 +25,8 @@ export interface SynthesizeEvidenceInput {
   btcAnalysis: SymbolAnalysis | null;
   ethAnalysis: SymbolAnalysis | null;
   breadthBullishSharePct: number | null;
+  recentLiquidations: LiquidationEvent[];
+  longShortRatio: LongShortRatioData | null;
   now: number;
 }
 
@@ -49,7 +51,7 @@ const UNUSABLE_REGIMES: MarketRegime[] = ['chaotic', 'insufficient_data'];
  * separately on top of this result.
  */
 export function synthesizeEvidence(input: SynthesizeEvidenceInput): EvidenceSynthesisResult {
-  const { symbol, analysis, candles, price, markPrice, btcAnalysis, ethAnalysis, breadthBullishSharePct, now } = input;
+  const { symbol, analysis, candles, price, markPrice, btcAnalysis, ethAnalysis, breadthBullishSharePct, recentLiquidations, longShortRatio, now } = input;
 
   const candles4h = candles['4h'] ?? [];
   const candles1d = candles['1d'] ?? [];
@@ -94,10 +96,10 @@ export function synthesizeEvidence(input: SynthesizeEvidenceInput): EvidenceSynt
 
   const trendEvidence = evaluateTrend(timeframe4h?.trend, candles4h, now);
   const momentumEvidence = evaluateMomentum(timeframe4h?.momentum, candles4h, now);
-  const volumeEvidence = evaluateVolume(analysis.volume, timeframe4h?.trend, candles1h.length > 0 ? candles1h : candles4h, now);
+  const volumeEvidence = evaluateVolume(analysis.volume, timeframe4h?.trend, candles1h.length > 0 ? candles1h : candles4h, price, now);
 
   const volatilityEvidence = evaluateVolatility(timeframe4h?.volatility, candles4h, now);
-  const derivativesEvidence = evaluateDerivatives(analysis.positioning, markPrice, price, now);
+  const derivativesEvidence = evaluateDerivatives(analysis.positioning, markPrice, price, recentLiquidations, longShortRatio, now);
   const marketContextEvidence = evaluateMarketContext({
     symbol,
     btcRegimeBias: btcAnalysis

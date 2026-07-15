@@ -39,6 +39,8 @@ describe('synthesizeEvidence -> decideThesis pipeline', () => {
       btcAnalysis: null,
       ethAnalysis: null,
       breadthBullishSharePct: null,
+      recentLiquidations: [],
+      longShortRatio: null,
       now: Date.now(),
     });
 
@@ -65,6 +67,8 @@ describe('synthesizeEvidence -> decideThesis pipeline', () => {
       btcAnalysis: null,
       ethAnalysis: null,
       breadthBullishSharePct: null,
+      recentLiquidations: [],
+      longShortRatio: null,
       now: Date.now(),
     });
     const result = decideThesis('SOLUSDT', synthesis);

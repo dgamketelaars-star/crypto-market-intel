@@ -166,6 +166,8 @@ export class SetupStore {
         btcAnalysis,
         ethAnalysis,
         breadthBullishSharePct,
+        recentLiquidations: marketData.recentLiquidations,
+        longShortRatio: marketData.longShortRatio ?? null,
         now,
         existingForSymbol,
         origin: this.origin,

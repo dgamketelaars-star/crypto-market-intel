@@ -2,7 +2,8 @@ import type { Candle } from '../../services/binance/types';
 import type { TrendAnalysis, VolumeAnalysis } from '../../analysis/engine/types';
 import { calculateObvSeries, calculateObvSlope } from '../../analysis/indicators/obv';
 import { categoryEvidence, fact, insufficientData } from '../evidence/build';
-import type { CategoryEvidence, EvidenceConclusion } from '../evidence/types';
+import type { CategoryEvidence, EvidenceConclusion, EvidenceFact } from '../evidence/types';
+import { calculateAnchoredVwap } from './anchoredVwap';
 
 /**
  * Volume is one Layer B vote: raw/relative volume, spike/trend state and
@@ -12,7 +13,7 @@ import type { CategoryEvidence, EvidenceConclusion } from '../evidence/types';
  * gets a direction by leaning on the *price* trend it's accompanying —
  * elevated volume alone is not inherently bullish or bearish.
  */
-export function evaluateVolume(volume: VolumeAnalysis | undefined, trend: TrendAnalysis | undefined, candles: Candle[], sourceTimestamp: number): CategoryEvidence {
+export function evaluateVolume(volume: VolumeAnalysis | undefined, trend: TrendAnalysis | undefined, candles: Candle[], price: number, sourceTimestamp: number): CategoryEvidence {
   if (!volume || !volume.sufficientData) {
     return insufficientData('volume', volume?.timeframe ?? null, sourceTimestamp, ['Insufficient candle history for relative volume.']);
   }
@@ -42,5 +43,21 @@ export function evaluateVolume(volume: VolumeAnalysis | undefined, trend: TrendA
     if (priceDirection === 'down' && obvSlope < 0) conclusion = 'slightly_bearish';
   }
 
-  return categoryEvidence({ category: 'volume', conclusion, supporting, timeframe: volume.timeframe, sourceTimestamp });
+  const opposing: EvidenceFact[] = [];
+  if (conclusion !== 'neutral') {
+    const anchoredVwap = calculateAnchoredVwap(candles);
+    if (anchoredVwap) {
+      const bullishLean = conclusion === 'bullish' || conclusion === 'slightly_bullish';
+      const priceAboveVwap = price > anchoredVwap.vwap;
+      const vwapFact = fact(
+        `Price is ${priceAboveVwap ? 'above' : 'below'} the VWAP anchored to the last swing pivot at ${anchoredVwap.anchorPrice.toFixed(4)} (anchored VWAP: ${anchoredVwap.vwap.toFixed(4)}).`,
+        volume.timeframe,
+        sourceTimestamp,
+      );
+      if (priceAboveVwap === bullishLean) supporting.push(vwapFact);
+      else opposing.push(vwapFact);
+    }
+  }
+
+  return categoryEvidence({ category: 'volume', conclusion, supporting, opposing, timeframe: volume.timeframe, sourceTimestamp });
 }

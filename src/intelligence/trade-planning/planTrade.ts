@@ -1,4 +1,4 @@
-import type { Candle } from '../../services/binance/types';
+import type { Candle, LiquidationEvent } from '../../services/binance/types';
 import type { VolatilityClassification } from '../../analysis/engine/types';
 import type { CategoryEvidence } from '../evidence/types';
 import type { ThesisDirection } from '../structure/entryLocation';
@@ -22,6 +22,8 @@ export interface PlanTradeInput {
   quoteVolumeRank: number | null;
   universeSize: number | null;
   priceVsEma200Pct: number | null;
+  recentLiquidations: LiquidationEvent[];
+  now: number;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface PlanTradeInput {
  * trade-planning spec requires.
  */
 export function planTrade(input: PlanTradeInput): TradePlanResult {
-  const { direction, price, candles1h, candles4h, atr1h, atr4h, volatility4h, derivativesEvidence, btcContextEvidence, quoteVolumeRank, universeSize, priceVsEma200Pct } = input;
+  const { direction, price, candles1h, candles4h, atr1h, atr4h, volatility4h, derivativesEvidence, btcContextEvidence, quoteVolumeRank, universeSize, priceVsEma200Pct, recentLiquidations, now } = input;
 
   const horizonDecision = decideTradeHorizon({ direction, candles1h, candles4h, price, atr1h, atr4h });
   if (!horizonDecision) {
@@ -81,6 +83,8 @@ export function planTrade(input: PlanTradeInput): TradePlanResult {
     universeSize,
     nearestTargetRewardToRisk: targets[0]?.rewardToRisk ?? null,
     priceVsEma200Pct,
+    recentLiquidations,
+    sourceTimestamp: now,
   });
 
   return {

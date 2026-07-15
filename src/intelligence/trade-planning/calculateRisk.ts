@@ -1,20 +1,37 @@
 import type { VolatilityClassification } from '../../analysis/engine/types';
+import type { LiquidationEvent } from '../../services/binance/types';
 import type { CategoryEvidence } from '../evidence/types';
 import { INTEL_RULES } from '../rules';
 import type { ThesisDirection } from '../structure/entryLocation';
 import { leansWith, stronglyOpposes, type RiskLevel } from '../thesis/types';
 
 /**
- * A round-number proxy, not real liquidation data — this app has no
- * liquidation stream (see the trade-planning spec's derivatives caveat). A
- * stop landing near a round number is flagged as elevated stop-hunt *risk*,
- * never treated as a guaranteed reaction level.
+ * A round-number proxy — used only as a *fallback* when no real recent
+ * liquidation data is available nearby (see isNearLiquidationCluster below,
+ * which is checked first now that the app subscribes to Binance's
+ * `!forceOrder@arr` liquidation stream). A stop landing near a round number
+ * is flagged as elevated stop-hunt *risk*, never treated as a guaranteed
+ * reaction level.
  */
 function isNearRoundNumber(price: number): boolean {
   if (price <= 0) return false;
   const magnitude = 10 ** Math.floor(Math.log10(price));
   const nearestRound = Math.round(price / magnitude) * magnitude;
   return Math.abs(price - nearestRound) / price <= INTEL_RULES.tradePlanning.roundNumberTolerancePct / 100;
+}
+
+/**
+ * Real liquidation clustering: does recent forced-liquidation volume sit
+ * near this price? This is genuine evidence, not a guess — but it is still
+ * only ever used as a risk *annotation*, never treated as a guaranteed
+ * reaction/turning level (liquidation zones can just as easily get blown
+ * through as bounce from).
+ */
+function isNearLiquidationCluster(price: number, liquidations: LiquidationEvent[], sourceTimestamp: number): boolean {
+  const cutoff = sourceTimestamp - INTEL_RULES.liquidations.lookbackMs;
+  const tolerance = price * (INTEL_RULES.liquidations.clusterTolerancePct / 100);
+  const nearbyQty = liquidations.filter((e) => e.time >= cutoff && Math.abs(e.price - price) <= tolerance).reduce((sum, e) => sum + e.quantity, 0);
+  return nearbyQty >= INTEL_RULES.liquidations.minClusterQuantity;
 }
 
 export interface RiskInput {
@@ -29,6 +46,8 @@ export interface RiskInput {
   universeSize: number | null;
   nearestTargetRewardToRisk: number | null;
   priceVsEma200Pct: number | null;
+  recentLiquidations: LiquidationEvent[];
+  sourceTimestamp: number;
 }
 
 export interface RiskResult {
@@ -45,7 +64,7 @@ export interface RiskResult {
  * recalibrated once real trade outcomes are observable).
  */
 export function calculateRisk(input: RiskInput): RiskResult {
-  const { direction, volatilityClassification, stopDistance, stopFloor, invalidationPrice, derivativesEvidence, btcContextEvidence, quoteVolumeRank, universeSize, nearestTargetRewardToRisk, priceVsEma200Pct } = input;
+  const { direction, volatilityClassification, stopDistance, stopFloor, invalidationPrice, derivativesEvidence, btcContextEvidence, quoteVolumeRank, universeSize, nearestTargetRewardToRisk, priceVsEma200Pct, recentLiquidations, sourceTimestamp } = input;
 
   const factors: string[] = [];
   let score = 0;
@@ -88,9 +107,12 @@ export function calculateRisk(input: RiskInput): RiskResult {
     factors.push('Price is significantly extended from its 200-EMA');
   }
 
-  if (isNearRoundNumber(invalidationPrice)) {
+  if (isNearLiquidationCluster(invalidationPrice, recentLiquidations, sourceTimestamp)) {
     score += 1;
-    factors.push('Stop sits near a round-number level — a proxy stop-hunt risk, not a guaranteed reaction level');
+    factors.push('Stop sits inside a recent real liquidation cluster — an actual stop-hunt risk, not a guaranteed reaction level');
+  } else if (isNearRoundNumber(invalidationPrice)) {
+    score += 1;
+    factors.push('Stop sits near a round-number level — a proxy stop-hunt risk (no recent liquidation data nearby), not a guaranteed reaction level');
   }
 
   const risk: RiskLevel = score <= 1 ? 'Low' : score <= 3 ? 'Medium' : score <= 5 ? 'High' : 'Very high';

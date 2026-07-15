@@ -37,6 +37,25 @@ export interface OpenInterestData {
   time: number;
 }
 
+/** One forced liquidation fill from the `!forceOrder@arr` stream. */
+export interface LiquidationEvent {
+  symbol: string;
+  /** The liquidation *order's* side — SELL liquidates a long position, BUY liquidates a short position. */
+  side: 'BUY' | 'SELL';
+  price: number;
+  quantity: number;
+  time: number;
+}
+
+/** Top-trader long/short account ratio (`/futures/data/topLongShortAccountRatio`). */
+export interface LongShortRatioData {
+  symbol: string;
+  longShortRatio: number;
+  longAccountPct: number;
+  shortAccountPct: number;
+  time: number;
+}
+
 export type CandleInterval = '15m' | '1h' | '4h' | '1d';
 
 export interface Candle {

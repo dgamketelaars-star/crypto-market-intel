@@ -24,6 +24,23 @@ export const INTEL_RULES = {
   volume: {
     breakoutConfirmMinRelativeVolume: 1.3,
   },
+  volumeProfile: {
+    bucketCount: 50,
+    /** A bucket is a High Volume Node when it's a local peak carrying at least this many times the window's mean bucket volume. */
+    hvnMeanMult: 1.5,
+    /** A bucket is a Low Volume Node ("gap") when it's a local trough carrying at most this fraction of the window's mean bucket volume. */
+    lvnMeanMult: 0.5,
+    /** A volume-profile level within this many ATR of a swing-pivot zone counts as confluence (both methods agree) — see entryLocation.ts. */
+    confluenceAtrMult: 0.5,
+  },
+  liquidations: {
+    /** How far back to look when checking whether a candidate stop/target sits inside a recent liquidation cluster. */
+    lookbackMs: 30 * 60_000,
+    /** A price level needs at least this much liquidated notional-equivalent quantity nearby to count as a "cluster", not noise. */
+    minClusterQuantity: 3,
+    /** A stop/target within this tolerance of a recent liquidation cluster gets a proxy stop-hunt annotation. */
+    clusterTolerancePct: 0.3,
+  },
   marketContext: {
     /** How many of the Top-20 (excluding BTC/ETH) need to agree with BTC's regime bias to call the breadth "confirming". */
     breadthConfirmMinShare: 0.55,

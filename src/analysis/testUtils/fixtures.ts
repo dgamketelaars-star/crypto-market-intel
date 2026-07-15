@@ -54,3 +54,22 @@ export function zigzagCandles(pivots: number[], segment = 4): Candle[] {
   closes.push(pivots[pivots.length - 1]);
   return closes.map((close, i) => makeCandle({ close, high: close + 0.05, low: close - 0.05 }, i));
 }
+
+/** Same construction as zigzagCandles, but each pivot-to-pivot leg carries its own volume — lets a test control a wave's "effort" independently of its "result" (price progress). */
+export function zigzagCandlesWithVolume(pivots: number[], volumePerLeg: number[], segment = 4): Candle[] {
+  const candles: Candle[] = [];
+  let index = 0;
+  for (let p = 0; p < pivots.length - 1; p++) {
+    const from = pivots[p];
+    const to = pivots[p + 1];
+    const volume = volumePerLeg[p];
+    for (let s = 0; s < segment; s++) {
+      const close = from + ((to - from) * s) / segment;
+      candles.push(makeCandle({ close, high: close + 0.05, low: close - 0.05, volume }, index));
+      index += 1;
+    }
+  }
+  const last = pivots[pivots.length - 1];
+  candles.push(makeCandle({ close: last, high: last + 0.05, low: last - 0.05, volume: volumePerLeg.at(-1) ?? 10 }, index));
+  return candles;
+}

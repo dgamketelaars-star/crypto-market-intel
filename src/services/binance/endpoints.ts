@@ -15,6 +15,8 @@ export const REST_ENDPOINTS = {
   premiumIndex: '/fapi/v1/premiumIndex',
   openInterest: '/fapi/v1/openInterest',
   klines: '/fapi/v1/klines',
+  /** Top-trader (by position) long/short account ratio — a second, independent positioning read alongside funding/OI. */
+  topLongShortAccountRatio: '/futures/data/topLongShortAccountRatio',
 } as const;
 
 export function klineStreamName(symbol: string, interval: string): string {
@@ -27,6 +29,17 @@ export function markPriceStreamName(symbol: string): string {
 
 export function tickerStreamName(symbol: string): string {
   return `${symbol.toLowerCase()}@ticker`;
+}
+
+/**
+ * All-market forced-liquidation stream — one subscription covers every
+ * symbol on the exchange, not just our tracked universe (there is no
+ * per-symbol equivalent worth using here: subscribing to ~22 individual
+ * `<symbol>@forceOrder` streams would cost more than this single stream,
+ * and the store filters to our universe on arrival).
+ */
+export function allForceOrderStreamName(): string {
+  return '!forceOrder@arr';
 }
 
 export function combinedStreamUrl(streams: string[]): string {

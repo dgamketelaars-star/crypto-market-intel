@@ -17,17 +17,22 @@ export interface EntryZoneResult {
  */
 export function buildEntryZone(zone: DefensibleZone, timeframe: CandleInterval): EntryZoneResult {
   const tolerance = zone.price * (INTEL_RULES.tradePlanning.entryZoneTolerancePct / 100);
+  const confluenceSuffix = zone.confluence ? ' — confirmed by volume-profile confluence' : '';
+  let method: string;
+  let explanation: string;
+  if (zone.source === 'retest') {
+    method = 'retest-of-broken-level';
+    explanation = `Price is retesting the broken structural level at ${zone.price.toFixed(4)}${confluenceSuffix}.`;
+  } else if (zone.source === 'volume_profile') {
+    method = 'volume-profile-level';
+    explanation = `Volume-profile level (POC/value-area/high-volume-node) at ${zone.price.toFixed(4)}.`;
+  } else {
+    method = 'support-resistance-zone';
+    explanation = `Structural zone at ${zone.price.toFixed(4)} (${zone.touches} touches)${confluenceSuffix}.`;
+  }
   return {
     entryZone: { low: zone.price - tolerance, high: zone.price + tolerance },
-    trigger: {
-      price: zone.price,
-      timeframe,
-      method: zone.source === 'retest' ? 'retest-of-broken-level' : 'support-resistance-zone',
-      explanation:
-        zone.source === 'retest'
-          ? `Price is retesting the broken structural level at ${zone.price.toFixed(4)}.`
-          : `Structural zone at ${zone.price.toFixed(4)} (${zone.touches} touches).`,
-    },
+    trigger: { price: zone.price, timeframe, method, explanation },
   };
 }
 

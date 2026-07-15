@@ -4,12 +4,13 @@ import {
   isEligiblePerpetual,
   normalizeCandleRest,
   normalizeFundingRest,
+  normalizeLongShortRatioRest,
   normalizeMarkPriceRest,
   normalizeOpenInterestRest,
   normalizeSymbol,
   normalizeTickerRest,
 } from './normalizers';
-import type { Candle, CandleInterval, FundingData, FuturesSymbol, MarkPriceData, OpenInterestData, TickerData } from './types';
+import type { Candle, CandleInterval, FundingData, FuturesSymbol, LongShortRatioData, MarkPriceData, OpenInterestData, TickerData } from './types';
 
 function buildUrl(path: string, params?: Record<string, string | number>): string {
   const target = new URL(path, BINANCE_FAPI_BASE_URL);
@@ -60,4 +61,11 @@ export async function fetchKlines(symbol: string, interval: CandleInterval, limi
     throw new Error('Unexpected klines response shape');
   }
   return data.map(normalizeCandleRest);
+}
+
+/** Most recent top-trader long/short account ratio reading for one symbol. */
+export async function fetchTopLongShortAccountRatio(symbol: string, period = '1h'): Promise<LongShortRatioData | null> {
+  const data = await fetchJson<unknown[]>(buildUrl(REST_ENDPOINTS.topLongShortAccountRatio, { symbol, period, limit: 1 }));
+  if (!Array.isArray(data) || data.length === 0) return null;
+  return normalizeLongShortRatioRest(data[0]);
 }

@@ -16,6 +16,7 @@ function marketData(symbol: string, closes: number[], quoteVolume?: number): Sym
       quoteVolume !== undefined
         ? { symbol, lastPrice: closes.at(-1)!, priceChangePercent: 1, quoteVolume, time: Date.now() }
         : undefined,
+    recentLiquidations: [],
     updatedAt: Date.now(),
   };
 }

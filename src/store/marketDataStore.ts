@@ -1,4 +1,5 @@
 import {
+  allForceOrderStreamName,
   klineStreamName,
   markPriceStreamName,
   tickerStreamName,
@@ -6,6 +7,7 @@ import {
 import {
   normalizeCandleStream,
   normalizeFundingStream,
+  normalizeLiquidationStream,
   normalizeMarkPriceStream,
   normalizeTickerStream,
 } from '../services/binance/normalizers';
@@ -15,6 +17,7 @@ import {
   fetchOpenInterest,
   fetchPremiumIndexAll,
   fetchTicker24hrAll,
+  fetchTopLongShortAccountRatio,
 } from '../services/binance/rest';
 import type {
   Candle,
@@ -22,6 +25,8 @@ import type {
   ConnectionState,
   FundingData,
   FuturesSymbol,
+  LiquidationEvent,
+  LongShortRatioData,
   MarkPriceData,
   OpenInterestData,
   TickerData,
@@ -42,6 +47,8 @@ const CANDLE_LIMIT = 250;
 const FETCH_CONCURRENCY = 4;
 /** Grace window so a React StrictMode dev double-mount doesn't tear down and reopen the socket. */
 const TEARDOWN_GRACE_MS = 300;
+/** Rolling per-symbol liquidation buffer — a "recent liquidation clustering" read needs recency, not full history. */
+const LIQUIDATION_BUFFER_SIZE = 100;
 
 export interface SymbolMarketData {
   symbol: string;
@@ -49,6 +56,9 @@ export interface SymbolMarketData {
   markPrice?: MarkPriceData;
   funding?: FundingData;
   openInterest?: OpenInterestData;
+  longShortRatio?: LongShortRatioData;
+  /** Most recent forced liquidations for this symbol, oldest first, capped at LIQUIDATION_BUFFER_SIZE. */
+  recentLiquidations: LiquidationEvent[];
   candles: Partial<Record<CandleInterval, Candle[]>>;
   updatedAt: number;
 }
@@ -66,7 +76,7 @@ export interface MarketDataState {
 type Listener = () => void;
 
 function emptySymbolData(symbol: string): SymbolMarketData {
-  return { symbol, candles: {}, updatedAt: 0 };
+  return { symbol, candles: {}, recentLiquidations: [], updatedAt: 0 };
 }
 
 class MarketDataStore {
@@ -147,6 +157,14 @@ class MarketDataStore {
     this.updateSymbol(symbol, { candles: { ...prev.candles, [interval]: nextCandles } });
   }
 
+  /** The all-market stream covers every symbol on the exchange — only buffer liquidations for symbols we actually track. */
+  private appendLiquidation(event: LiquidationEvent): void {
+    const prev = this.state.bySymbol[event.symbol];
+    if (!prev) return;
+    const next = [...prev.recentLiquidations, event].slice(-LIQUIDATION_BUFFER_SIZE);
+    this.updateSymbol(event.symbol, { recentLiquidations: next });
+  }
+
   private start(): void {
     this.started = true;
     if (typeof window !== 'undefined') {
@@ -214,6 +232,15 @@ class MarketDataStore {
   private handleStreamMessage(streamName: string, data: unknown): void {
     this.setState({ lastMessageAt: Date.now() });
     this.recomputeConnectionState();
+
+    if (streamName === allForceOrderStreamName()) {
+      try {
+        this.appendLiquidation(normalizeLiquidationStream(data));
+      } catch (error) {
+        if (import.meta.env.DEV) console.error('[market-data-store] failed to process liquidation message', error);
+      }
+      return;
+    }
 
     const at = streamName.indexOf('@');
     if (at === -1) return;
@@ -303,7 +330,7 @@ class MarketDataStore {
 
       this.setState({ universe, universeLoading: false, lastRestSyncAt: Date.now(), error: null });
 
-      const desiredStreams = this.streamsForUniverse(universe);
+      const desiredStreams = [...this.streamsForUniverse(universe), allForceOrderStreamName()];
       if (this.wsStatus === 'open') {
         this.stream.setStreams(desiredStreams);
       } else {
@@ -333,6 +360,7 @@ class MarketDataStore {
     );
   }
 
+  /** Open interest and the long/short account ratio are both low-frequency positioning polls — sharing one timer avoids a second interval doing the same job at a near-identical cadence. */
   private restartOpenInterestPolling(universe: FuturesSymbol[]): void {
     if (this.openInterestTimer) clearInterval(this.openInterestTimer);
     const poll = () => {
@@ -341,6 +369,14 @@ class MarketDataStore {
         async ({ symbol }) => {
           const openInterest = await fetchOpenInterest(symbol);
           this.updateSymbol(symbol, { openInterest });
+        },
+        FETCH_CONCURRENCY,
+      );
+      void mapWithConcurrency(
+        universe,
+        async ({ symbol }) => {
+          const longShortRatio = await fetchTopLongShortAccountRatio(symbol);
+          if (longShortRatio) this.updateSymbol(symbol, { longShortRatio });
         },
         FETCH_CONCURRENCY,
       );

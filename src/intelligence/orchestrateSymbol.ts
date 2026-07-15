@@ -1,5 +1,5 @@
 import type { SymbolAnalysis } from '../analysis/engine/types';
-import type { Candle, CandleInterval } from '../services/binance/types';
+import type { Candle, CandleInterval, LiquidationEvent, LongShortRatioData } from '../services/binance/types';
 import type { GeneratedSetup } from '../setups/engine/types';
 import { OPEN_SETUP_STATUSES } from '../setups/engine/types';
 import { checkExpiry } from '../setups/lifecycle/lifecycle';
@@ -19,6 +19,8 @@ export interface OrchestrateSymbolInput {
   btcAnalysis: SymbolAnalysis | null;
   ethAnalysis: SymbolAnalysis | null;
   breadthBullishSharePct: number | null;
+  recentLiquidations: LiquidationEvent[];
+  longShortRatio: LongShortRatioData | null;
   now: number;
   existingForSymbol: GeneratedSetup[];
   origin: 'live' | 'simulation';
@@ -34,7 +36,7 @@ export interface OrchestrateSymbolInput {
  * only ever tracks a single open setup per symbol at a time.
  */
 export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups: GeneratedSetup[] } {
-  const { symbol, price, markPrice, analysis, candles, btcAnalysis, ethAnalysis, breadthBullishSharePct, now, existingForSymbol, origin, priceIsStale = false } = input;
+  const { symbol, price, markPrice, analysis, candles, btcAnalysis, ethAnalysis, breadthBullishSharePct, recentLiquidations, longShortRatio, now, existingForSymbol, origin, priceIsStale = false } = input;
 
   const passthrough: GeneratedSetup[] = [];
   let openSetup: GeneratedSetup | null = null;
@@ -54,7 +56,7 @@ export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups:
     return { setups: [...passthrough, evaluateActiveIntelligenceSetup(openSetup, price, now)] };
   }
 
-  const synthesis = synthesizeEvidence({ symbol, analysis, candles, price, markPrice, btcAnalysis, ethAnalysis, breadthBullishSharePct, now });
+  const synthesis = synthesizeEvidence({ symbol, analysis, candles, price, markPrice, btcAnalysis, ethAnalysis, breadthBullishSharePct, recentLiquidations, longShortRatio, now });
   const thesis = decideThesis(symbol, synthesis);
 
   if (thesis.outcome === 'NO_THESIS') {
@@ -77,6 +79,8 @@ export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups:
     quoteVolumeRank: analysis.volume.quoteVolumeRank,
     universeSize: analysis.volume.universeSize,
     priceVsEma200Pct: timeframe4h?.trend.priceVsEma200Pct ?? null,
+    recentLiquidations,
+    now,
   });
 
   if (plan.outcome === 'NO_PLAN') {

@@ -22,6 +22,8 @@ import { latestAdx } from '../src/analysis/indicators/adx';
 import { classifyMarketRegime } from '../src/intelligence/regime/classifyRegime';
 import type { MarketRegime } from '../src/intelligence/regime/types';
 import { detectStructureEvent } from '../src/intelligence/structure/structureEvents';
+import { buildVolumeProfile } from '../src/intelligence/structure/volumeProfile';
+import { calculateWeisWaves } from '../src/intelligence/momentum/weisWave';
 import type { Candle } from '../src/services/binance/types';
 
 const BINANCE_FAPI = 'https://fapi.binance.com/fapi/v1/klines';
@@ -63,6 +65,11 @@ interface CheckpointResult {
   structureEvent: string;
   trendClassification: string;
   volatilityClassification: string;
+  poc: number | null;
+  pocWithinRange: boolean;
+  highVolumeNodeCount: number;
+  lowVolumeNodeCount: number;
+  weisWaveEffortVsResult: string;
 }
 
 function runCheckpoints(symbol: string, candles: Candle[]): CheckpointResult[] {
@@ -88,6 +95,13 @@ function runCheckpoints(symbol: string, candles: Candle[]): CheckpointResult[] {
     });
     const structureEvent = detectStructureEvent(window);
 
+    const profile = buildVolumeProfile(window);
+    const windowLow = Math.min(...window.map((c) => c.low));
+    const windowHigh = Math.max(...window.map((c) => c.high));
+    const pocWithinRange = !profile.sufficientData || (profile.poc >= windowLow && profile.poc <= windowHigh);
+
+    const weisWave = calculateWeisWaves(window);
+
     results.push({
       date: new Date(asOf.closeTime).toISOString().slice(0, 10),
       price: asOf.close,
@@ -96,6 +110,11 @@ function runCheckpoints(symbol: string, candles: Candle[]): CheckpointResult[] {
       structureEvent: structureEvent.event,
       trendClassification: tf.trend.classification,
       volatilityClassification: tf.volatility.classification,
+      poc: profile.sufficientData ? profile.poc : null,
+      pocWithinRange,
+      highVolumeNodeCount: profile.highVolumeNodes.length,
+      lowVolumeNodeCount: profile.lowVolumeNodes.length,
+      weisWaveEffortVsResult: weisWave.latestWaveEffortVsResult,
     });
   }
   return results;
@@ -128,6 +147,11 @@ async function main() {
     console.log(`  ${results.length} checkpoints evaluated (every ${STEP_DAYS} days, ${WINDOW_SIZE}-candle window)`);
     printDistribution('Regime distribution', tally(results, 'regime'));
     printDistribution('Structure event distribution', tally(results, 'structureEvent'));
+    printDistribution('Weis wave effort-vs-result distribution', tally(results, 'weisWaveEffortVsResult'));
+    const withProfile = results.filter((r) => r.poc !== null);
+    const avgHvn = withProfile.length ? withProfile.reduce((sum, r) => sum + r.highVolumeNodeCount, 0) / withProfile.length : 0;
+    const avgLvn = withProfile.length ? withProfile.reduce((sum, r) => sum + r.lowVolumeNodeCount, 0) / withProfile.length : 0;
+    console.log(`  Volume profile: ${withProfile.length}/${results.length} checkpoints produced a profile, avg ${avgHvn.toFixed(1)} HVN / ${avgLvn.toFixed(1)} LVN per window`);
   }
 
   console.log('\n\n=== Dated checkpoints for manual spot-check (BTCUSDT, every ~100 days) ===');
@@ -143,7 +167,8 @@ async function main() {
     const chaoticCount = results.filter((r) => r.regime === 'chaotic').length;
     const insufficientCount = results.filter((r) => r.regime === 'insufficient_data').length;
     const strongTrendWithLowAdxBias = results.filter((r) => (r.regime === 'strong_uptrend' || r.regime === 'strong_downtrend') && r.bias === 'neutral');
-    console.log(`  ${symbol}: chaotic=${chaoticCount} (expected 0 — offline check feeds identical 4H/1D, see disclosed simplification), insufficient_data=${insufficientCount}, strong-trend-with-neutral-bias=${strongTrendWithLowAdxBias.length} (should always be 0 — bias must follow strong/weak trend regimes)`);
+    const pocOutsideRange = results.filter((r) => !r.pocWithinRange);
+    console.log(`  ${symbol}: chaotic=${chaoticCount} (expected 0 — offline check feeds identical 4H/1D, see disclosed simplification), insufficient_data=${insufficientCount}, strong-trend-with-neutral-bias=${strongTrendWithLowAdxBias.length} (should always be 0 — bias must follow strong/weak trend regimes), poc-outside-window-range=${pocOutsideRange.length} (should always be 0 — a hard invariant, not a calibration judgment call)`);
   }
 }
 

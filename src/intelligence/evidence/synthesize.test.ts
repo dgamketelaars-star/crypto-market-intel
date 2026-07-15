@@ -40,6 +40,8 @@ describe('synthesizeEvidence', () => {
       btcAnalysis: null,
       ethAnalysis: null,
       breadthBullishSharePct: null,
+      recentLiquidations: [],
+      longShortRatio: null,
       now: 1,
     });
 
@@ -73,6 +75,8 @@ describe('synthesizeEvidence', () => {
       btcAnalysis: null,
       ethAnalysis: null,
       breadthBullishSharePct: null,
+      recentLiquidations: [],
+      longShortRatio: null,
       now: 1,
     });
     // provisionalBias must trace back only to regime + structure (deriveLayerABias), independent of Layer C.
@@ -96,6 +100,8 @@ describe('synthesizeEvidence', () => {
       btcAnalysis: null,
       ethAnalysis: null,
       breadthBullishSharePct: null,
+      recentLiquidations: [],
+      longShortRatio: null,
       now: 1,
     });
     expect(result.layers.layerA.marketRegime.gateStatus).toBe('blocked');

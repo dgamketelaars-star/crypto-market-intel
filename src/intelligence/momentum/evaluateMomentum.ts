@@ -2,7 +2,8 @@ import type { Candle } from '../../services/binance/types';
 import type { MomentumAnalysis } from '../../analysis/engine/types';
 import { calculateStochasticSeries } from '../../analysis/indicators/stochastic';
 import { categoryEvidence, fact, insufficientData } from '../evidence/build';
-import type { CategoryEvidence, EvidenceConclusion } from '../evidence/types';
+import type { CategoryEvidence, EvidenceConclusion, EvidenceFact } from '../evidence/types';
+import { calculateWeisWaves } from './weisWave';
 
 /**
  * Momentum is one Layer B vote: RSI, MACD (+ histogram direction), ROC and
@@ -55,5 +56,15 @@ export function evaluateMomentum(momentum: MomentumAnalysis | undefined, candles
     conclusion = 'neutral';
   }
 
-  return categoryEvidence({ category: 'momentum', conclusion, supporting, timeframe: momentum.timeframe, sourceTimestamp });
+  const opposing: EvidenceFact[] = [];
+  if (momentum.classification === 'strengthening' || momentum.classification === 'weakening') {
+    const weisResult = calculateWeisWaves(candles).latestWaveEffortVsResult;
+    if (weisResult !== 'insufficient_data' && weisResult !== 'neutral') {
+      const weisFact = fact(`Weis wave analysis: the latest price swing is ${weisResult} (price-progress-per-unit-volume vs. the prior same-direction swing).`, momentum.timeframe, sourceTimestamp);
+      if (weisResult === momentum.classification) supporting.push(weisFact);
+      else opposing.push(fact(`${weisFact.description} This conflicts with the RSI/MACD-based ${momentum.classification} read.`, momentum.timeframe, sourceTimestamp));
+    }
+  }
+
+  return categoryEvidence({ category: 'momentum', conclusion, supporting, opposing, timeframe: momentum.timeframe, sourceTimestamp });
 }

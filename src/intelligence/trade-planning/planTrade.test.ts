@@ -24,6 +24,8 @@ function baseInput(overrides: Partial<PlanTradeInput> = {}): PlanTradeInput {
     quoteVolumeRank: 3,
     universeSize: 20,
     priceVsEma200Pct: 5,
+    recentLiquidations: [],
+    now: 1_000_000,
     ...overrides,
   };
 }
@@ -95,9 +97,11 @@ describe('planTrade', () => {
     if (result.outcome === 'NO_PLAN') expect(result.reason).toBe('no_structural_stack');
   });
 
-  it('rejects with no_structural_stack when neither timeframe has a defensible zone for the direction', () => {
-    const flatCandles = zigzagCandles([100, 101]); // far too little history for any swing pivot
-    const result = planTrade(baseInput({ candles1h: flatCandles, candles4h: flatCandles, price: 100.5 }));
+  it('rejects with no_structural_stack when there is no candle data at all on either timeframe', () => {
+    // Any real candle series with actual price movement now has *some* structural source to fall back
+    // on (swing zone, retest, or the volume-profile fallback) — the only scenario with truly nothing to
+    // work with on any source is having no candle data at all.
+    const result = planTrade(baseInput({ candles1h: [], candles4h: [], price: 100 }));
     expect(result.outcome).toBe('NO_PLAN');
     if (result.outcome === 'NO_PLAN') expect(result.reason).toBe('no_structural_stack');
   });

@@ -2,7 +2,7 @@ import type { SymbolAnalysis } from '../analysis/engine/types';
 import type { Candle, CandleInterval, LiquidationEvent, LongShortRatioData } from '../services/binance/types';
 import type { GeneratedSetup } from '../setups/engine/types';
 import { OPEN_SETUP_STATUSES } from '../setups/engine/types';
-import { checkExpiry } from '../setups/lifecycle/lifecycle';
+import { checkExpiry, closeOpenSetup } from '../setups/lifecycle/lifecycle';
 import { synthesizeEvidence } from './evidence/synthesize';
 import { advanceIntelligenceSetup, invalidateVanishedIntelligenceSetup } from './lifecycle/advanceIntelligenceSetup';
 import { createIntelligenceSetup } from './lifecycle/createIntelligenceSetup';
@@ -104,8 +104,24 @@ export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups:
   return { setups: [...passthrough, closedOld, fresh] };
 }
 
-/** Applied to symbols that fell out of the dynamic universe — only expiry, no fresh evaluation possible without live data. */
-export function expireVanishedUniverseSetup(setup: GeneratedSetup, now: number): GeneratedSetup | null {
-  if (!OPEN_SETUP_STATUSES.includes(setup.status) || setup.status === 'active') return null;
+/**
+ * Applied to symbols that fell out of the dynamic Top-20 universe — no
+ * fresh evaluation is possible without live data for them. A still-forming
+ * setup gets the normal age-based expiry check. An ACTIVE setup must be
+ * force-closed here, not silently left alone: once its symbol drops out of
+ * the tracked universe, this app stops fetching that symbol's market data
+ * entirely, so an "active" setup would otherwise sit forever showing a
+ * frozen, silently-stale price/status — misleading, and (because setups are
+ * only ever persisted per-browser) a direct cause of two devices drifting
+ * further apart than live evidence differences alone would ever produce: a
+ * setup that quietly went dark on one device just keeps being shown there
+ * indefinitely while the other device never created it (or already closed
+ * it) at all.
+ */
+export function expireVanishedUniverseSetup(setup: GeneratedSetup, now: number, lastKnownPrice: number | null): GeneratedSetup | null {
+  if (!OPEN_SETUP_STATUSES.includes(setup.status)) return null;
+  if (setup.status === 'active') {
+    return closeOpenSetup(setup, 'expired', 'Symbool viel uit de gevolgde Top-20 universe — live tracking kon niet worden voortgezet.', now, lastKnownPrice);
+  }
   return checkExpiry(setup, now);
 }

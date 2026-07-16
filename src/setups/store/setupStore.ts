@@ -180,8 +180,9 @@ export class SetupStore {
     // only apply the age-based expiry check to their still-open setups.
     for (const [symbol, setups] of existingBySymbol) {
       if (universeSymbols.has(symbol)) continue;
+      const lastKnownPrice = marketBySymbol[symbol]?.ticker?.lastPrice ?? null;
       for (const setup of setups) {
-        const expired = expireVanishedUniverseSetup(setup, now);
+        const expired = expireVanishedUniverseSetup(setup, now, lastKnownPrice);
         if (expired) nextSetups[expired.id] = expired;
       }
     }

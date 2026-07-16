@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeCandlesFromCloses, makeTrendingCloses } from '../analysis/testUtils/fixtures';
 import { makeSymbolAnalysis, makeStructure, makeTrend, makeVolatility } from '../setups/testUtils/analysisFixtures';
 import type { GeneratedSetup } from '../setups/engine/types';
-import { orchestrateSymbolSetup } from './orchestrateSymbol';
+import { expireVanishedUniverseSetup, orchestrateSymbolSetup } from './orchestrateSymbol';
 import { createIntelligenceSetup } from './lifecycle/createIntelligenceSetup';
 import { makeValidThesis, makeValidTradePlan } from './lifecycle/testUtils/lifecycleFixtures';
 
@@ -136,5 +136,61 @@ describe('orchestrateSymbolSetup', () => {
     };
     const { setups } = orchestrateSymbolSetup({ ...flatInsufficientInput(), existingForSymbol: [closed] });
     expect(setups.some((s) => s.id === closed.id && s.status === 'completed')).toBe(true);
+  });
+});
+
+describe('expireVanishedUniverseSetup', () => {
+  it('force-closes an ACTIVE setup once its symbol falls out of the tracked universe, instead of leaving it orphaned forever', () => {
+    const active = createIntelligenceSetup('SOLUSDT', makeValidThesis('LONG'), makeValidTradePlan('LONG'), {
+      price: 100,
+      now: NOW - 1000,
+      origin: 'live',
+      analysis: makeSymbolAnalysis({ symbol: 'SOLUSDT' }),
+      btcAnalysis: null,
+    });
+    expect(active.status).toBe('active');
+
+    const result = expireVanishedUniverseSetup(active, NOW, 103.5);
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('expired');
+    expect(result!.closedReason).toBe('expired');
+    expect(result!.closedPrice).toBe(103.5);
+    expect(result!.lifecycle.some((e) => e.detail.includes('Top-20'))).toBe(true);
+  });
+
+  it('records a null closedPrice when no last-known price is available for the vanished symbol', () => {
+    const active = createIntelligenceSetup('SOLUSDT', makeValidThesis('LONG'), makeValidTradePlan('LONG'), {
+      price: 100,
+      now: NOW - 1000,
+      origin: 'live',
+      analysis: makeSymbolAnalysis({ symbol: 'SOLUSDT' }),
+      btcAnalysis: null,
+    });
+    const result = expireVanishedUniverseSetup(active, NOW, null);
+    expect(result!.closedPrice).toBeNull();
+  });
+
+  it('still applies the normal age-based expiry check to a still-forming (non-active) setup', () => {
+    const waiting = createIntelligenceSetup('SOLUSDT', makeValidThesis('LONG'), makeValidTradePlan('LONG'), {
+      price: 103,
+      now: NOW - 1000,
+      origin: 'live',
+      analysis: makeSymbolAnalysis({ symbol: 'SOLUSDT' }),
+      btcAnalysis: null,
+    });
+    expect(waiting.status).toBe('waiting_for_confirmation');
+    // Not old enough to expire yet -> untouched, not force-closed just for leaving the universe.
+    expect(expireVanishedUniverseSetup(waiting, NOW, 103)).toBeNull();
+  });
+
+  it('does nothing to an already-closed setup', () => {
+    const closed: GeneratedSetup = {
+      ...createIntelligenceSetup('SOLUSDT', makeValidThesis('LONG'), makeValidTradePlan('LONG'), { price: 100, now: NOW - 1000, origin: 'live', analysis: makeSymbolAnalysis({ symbol: 'SOLUSDT' }), btcAnalysis: null }),
+      status: 'completed',
+      closedAt: NOW - 500,
+      closedReason: 'target',
+      closedPrice: 120,
+    };
+    expect(expireVanishedUniverseSetup(closed, NOW, 100)).toBeNull();
   });
 });

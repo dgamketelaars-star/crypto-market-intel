@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { useGeneratedSetups } from '../hooks/useGeneratedSetups';
 import { useSystemBSetups } from './open-source-strategy/useSystemBSetups';
 import { useSystemCSetups } from './independent-analysis/useSystemCSetups';
+import { useSystemDSetups } from './ichimoku-analysis/useSystemDSetups';
 import { marketDataStore } from '../store/marketDataStore';
 import { Badge } from '../components/ui/Badge';
 import { OPEN_SETUP_STATUSES } from '../setups/engine/types';
@@ -11,13 +12,15 @@ interface ComparisonRow {
   a: { direction: 'LONG' | 'SHORT'; status: string } | null;
   b: { direction: 'LONG' | 'SHORT'; status: string } | null;
   c: { direction: 'LONG' | 'SHORT'; status: string } | null;
+  d: { direction: 'LONG' | 'SHORT'; status: string } | null;
 }
 
 function agreementLabel(row: ComparisonRow): { label: string; tone: 'long' | 'short' | 'neutral' | 'amber' } {
-  const directions = [row.a?.direction, row.b?.direction, row.c?.direction].filter((d): d is 'LONG' | 'SHORT' => d != null);
+  const directions = [row.a?.direction, row.b?.direction, row.c?.direction, row.d?.direction].filter((d): d is 'LONG' | 'SHORT' => d != null);
   if (directions.length < 2) return { label: 'Onvoldoende data', tone: 'neutral' };
   const allSame = directions.every((d) => d === directions[0]);
-  return allSame ? { label: 'Overeenstemming', tone: directions[0] === 'LONG' ? 'long' : 'short' } : { label: 'Verschil van mening', tone: 'amber' };
+  if (allSame) return { label: `Overeenstemming (${directions.length})`, tone: directions[0] === 'LONG' ? 'long' : 'short' };
+  return { label: 'Verschil van mening', tone: 'amber' };
 }
 
 function DecisionCell({ decision }: { decision: ComparisonRow['a'] }) {
@@ -31,7 +34,7 @@ function DecisionCell({ decision }: { decision: ComparisonRow['a'] }) {
 }
 
 /**
- * Pure comparison/join layer — reads the three systems' already-computed
+ * Pure comparison/join layer — reads all four systems' already-computed
  * outputs and displays them side by side. Deliberately does not combine
  * their conclusions into any kind of consensus score or "who was right"
  * verdict: agreement is shown as a fact, never implied to prove correctness.
@@ -41,21 +44,24 @@ export function ComparisonPanel() {
   const setupsA = useGeneratedSetups();
   const setupsB = useSystemBSetups();
   const setupsC = useSystemCSetups();
+  const setupsD = useSystemDSetups();
 
   const rows: ComparisonRow[] = universe.map(({ symbol }) => {
     const openA = setupsA.find((s) => s.symbol === symbol && OPEN_SETUP_STATUSES.includes(s.status));
     const openB = setupsB.find((s) => s.symbol === symbol && (s.status === 'entry_triggered' || s.status === 'active'));
     const openC = setupsC.find((s) => s.symbol === symbol && (s.status === 'entry_zone_now' || s.status === 'active'));
+    const openD = setupsD.find((s) => s.symbol === symbol && (s.status === 'entry_zone_now' || s.status === 'active'));
 
     return {
       symbol,
       a: openA ? { direction: openA.direction, status: openA.status } : null,
       b: openB ? { direction: openB.direction, status: openB.status } : null,
       c: openC ? { direction: openC.direction, status: openC.status } : null,
+      d: openD ? { direction: openD.direction, status: openD.status } : null,
     };
   });
 
-  const withAnySetup = rows.filter((r) => r.a || r.b || r.c);
+  const withAnySetup = rows.filter((r) => r.a || r.b || r.c || r.d);
 
   return (
     <div className="space-y-3">
@@ -64,7 +70,7 @@ export function ComparisonPanel() {
         vergelijking van conclusies.
       </p>
       {withAnySetup.length === 0 ? (
-        <p className="text-sm text-slate-500">Geen van de drie systemen heeft momenteel een open setup.</p>
+        <p className="text-sm text-slate-500">Geen van de vier systemen heeft momenteel een open setup.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
           <table className="w-full text-left text-xs">
@@ -74,6 +80,7 @@ export function ComparisonPanel() {
                 <th className="px-3 py-2 font-medium">Onze analist (A)</th>
                 <th className="px-3 py-2 font-medium">Open-source model (B)</th>
                 <th className="px-3 py-2 font-medium">Onafhankelijke analyse (C)</th>
+                <th className="px-3 py-2 font-medium">Ichimoku (D)</th>
                 <th className="px-3 py-2 font-medium">Vergelijking</th>
               </tr>
             </thead>
@@ -86,6 +93,7 @@ export function ComparisonPanel() {
                     <td className="px-3 py-2"><DecisionCell decision={row.a} /></td>
                     <td className="px-3 py-2"><DecisionCell decision={row.b} /></td>
                     <td className="px-3 py-2"><DecisionCell decision={row.c} /></td>
+                    <td className="px-3 py-2"><DecisionCell decision={row.d} /></td>
                     <td className="px-3 py-2">
                       <Badge tone={agreement.tone}>{agreement.label}</Badge>
                     </td>

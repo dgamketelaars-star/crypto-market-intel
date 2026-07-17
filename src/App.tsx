@@ -5,14 +5,16 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SystemBPanel } from './comparator/open-source-strategy/components/SystemBPanel';
 import { SystemCPanel } from './comparator/independent-analysis/components/SystemCPanel';
+import { SystemDPanel } from './comparator/ichimoku-analysis/components/SystemDPanel';
 import { ComparisonPanel } from './comparator/ComparisonPanel';
 
-type Tab = 'analyst' | 'system-b' | 'system-c' | 'compare';
+type Tab = 'analyst' | 'system-b' | 'system-c' | 'system-d' | 'compare';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'analyst', label: 'Onze analist' },
   { id: 'system-b', label: 'Open-source model' },
   { id: 'system-c', label: 'Onafhankelijke analyse' },
+  { id: 'system-d', label: 'Ichimoku Analysis' },
   { id: 'compare', label: 'Vergelijken' },
 ];
 
@@ -48,6 +50,11 @@ function App() {
         {tab === 'system-c' && (
           <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
             <SystemCPanel />
+          </main>
+        )}
+        {tab === 'system-d' && (
+          <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+            <SystemDPanel />
           </main>
         )}
         {tab === 'compare' && (

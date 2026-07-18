@@ -14,9 +14,9 @@ export const SYSTEM_E_MODEL_NAME = 'AI Meta Analyst' as const;
 export const SYSTEM_E_PROVENANCE = {
   systemId: SYSTEM_E_ID,
   displayName: SYSTEM_E_MODEL_NAME,
-  nature: 'Live large-language-model reasoning (Anthropic Claude, Messages API), not a hardcoded rules engine and not a reimplementation of any open-source repository.',
+  nature: 'Live large-language-model reasoning (Anthropic Claude or OpenAI GPT, user\'s choice), not a hardcoded rules engine and not a reimplementation of any open-source repository.',
   apiKeyHandling:
-    'Bring-your-own-key: the Anthropic API key is entered by the user and stored ONLY in this browser\'s localStorage. It is sent directly from the browser to the Anthropic API (dangerouslyAllowBrowser) and never to any server this project controls. This app is a static GitHub Pages site with no backend, so there is nowhere else the key could safely live for a personal, single-user tool — this is a documented trade-off, not an oversight. The key is visible to anyone with devtools access to this specific browser/device.',
+    'Bring-your-own-key: the user chooses a provider (Anthropic or OpenAI) and enters that provider\'s API key, stored ONLY in this browser\'s localStorage. It is sent directly from the browser to the chosen provider\'s API (dangerouslyAllowBrowser) and never to any server this project controls. This app is a static GitHub Pages site with no backend, so there is nowhere else the key could safely live for a personal, single-user tool — this is a documented trade-off, not an oversight. The key is visible to anyone with devtools access to this specific browser/device. Both providers\' keys can be stored at once; only the currently selected provider\'s key is used.',
   costDisclosure:
     'Every analysis is a real, billed API call using the user\'s own key. System E runs automatically only on a long interval (not on the 5-second cadence used by Systems A-D) and only on a capped number of symbols per cycle, to keep cost predictable. Every call — success or failure — is logged with an estimated cost (see logging/systemELog.ts); the estimate is for transparency only, not a billing source of truth.',
   independenceFromOtherSystems:

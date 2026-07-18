@@ -22,10 +22,19 @@ export interface SystemELogEntry {
   estimatedCostUsd?: number;
 }
 
-const PRICING_USD_PER_MILLION_TOKENS: Record<SystemEModel, { input: number; output: number }> = {
-  'claude-opus-4-8': { input: 5.0, output: 25.0 },
-  'claude-sonnet-5': { input: 3.0, output: 15.0 },
-  'claude-haiku-4-5': { input: 1.0, output: 5.0 },
+/**
+ * cacheReadDiscount: fraction of the input price charged for cached tokens
+ * (Anthropic ~90% off, OpenAI ~50% off — different providers, different
+ * caching economics). cacheWriteMultiplier: extra cost of writing to cache,
+ * Anthropic-only — OpenAI's automatic prompt caching has no separate write
+ * cost, so it's omitted (treated as 0) for OpenAI models.
+ */
+const PRICING_USD_PER_MILLION_TOKENS: Record<SystemEModel, { input: number; output: number; cacheReadDiscount: number; cacheWriteMultiplier: number }> = {
+  'claude-opus-4-8': { input: 5.0, output: 25.0, cacheReadDiscount: 0.1, cacheWriteMultiplier: 1.25 },
+  'claude-sonnet-5': { input: 3.0, output: 15.0, cacheReadDiscount: 0.1, cacheWriteMultiplier: 1.25 },
+  'claude-haiku-4-5': { input: 1.0, output: 5.0, cacheReadDiscount: 0.1, cacheWriteMultiplier: 1.25 },
+  'gpt-4o': { input: 2.5, output: 10.0, cacheReadDiscount: 0.5, cacheWriteMultiplier: 0 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6, cacheReadDiscount: 0.5, cacheWriteMultiplier: 0 },
 };
 
 export function estimateCostUsd(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number): number | undefined {
@@ -33,8 +42,8 @@ export function estimateCostUsd(model: string, inputTokens: number, outputTokens
   if (!pricing) return undefined;
   const inputCost = (inputTokens / 1_000_000) * pricing.input;
   const outputCost = (outputTokens / 1_000_000) * pricing.output;
-  const cacheReadCost = (cacheReadTokens / 1_000_000) * pricing.input * 0.1;
-  const cacheCreationCost = (cacheCreationTokens / 1_000_000) * pricing.input * 1.25;
+  const cacheReadCost = (cacheReadTokens / 1_000_000) * pricing.input * pricing.cacheReadDiscount;
+  const cacheCreationCost = (cacheCreationTokens / 1_000_000) * pricing.input * pricing.cacheWriteMultiplier;
   return inputCost + outputCost + cacheReadCost + cacheCreationCost;
 }
 

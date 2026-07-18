@@ -204,15 +204,16 @@ export class SystemEStore {
   }
 
   private async analyzeSymbol(symbol: string, reason: 'strong_consensus' | 'disagreement', now: number): Promise<void> {
-    const apiKey = systemEApiKeyStore.getApiKey();
+    const provider = systemEApiKeyStore.getProvider();
+    const apiKey = systemEApiKeyStore.getApiKey(provider);
     if (!apiKey) return;
     const market = buildMarketSnapshot(symbol);
     if (!market) return;
 
     this.setState({ analyzing: new Set(this.state.analyzing).add(symbol) });
     const summaries = this.gatherSummaries(symbol, now);
-    const model = systemEApiKeyStore.getModel();
-    const outcome = await runMetaAnalysis({ apiKey, model, symbol, systemSummaries: summaries, market });
+    const model = systemEApiKeyStore.getModel(provider);
+    const outcome = await runMetaAnalysis({ provider, apiKey, model, symbol, systemSummaries: summaries, market });
 
     const stillAnalyzing = new Set(this.state.analyzing);
     stillAnalyzing.delete(symbol);

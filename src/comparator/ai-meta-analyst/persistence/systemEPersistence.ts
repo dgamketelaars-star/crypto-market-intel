@@ -10,10 +10,26 @@ function isBrowser(): boolean {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
+/**
+ * Validates the CURRENT two-phase shape (phase1 + phase2), not just the
+ * always-present id/symbol/generatedAt fields. A record saved before the
+ * phase1/phase2 split had a single `result` field instead — without this
+ * check it would pass validation, load, and then crash the UI the moment
+ * something tries to read record.phase2.finalDecision on undefined. Safer
+ * to silently drop an incompatible old record than to load it and crash.
+ */
 function isRecord(v: unknown): v is SystemERecord {
   if (typeof v !== 'object' || v === null) return false;
   const r = v as Record<string, unknown>;
-  return typeof r.id === 'string' && typeof r.symbol === 'string' && typeof r.generatedAt === 'number';
+  return (
+    typeof r.id === 'string' &&
+    typeof r.symbol === 'string' &&
+    typeof r.generatedAt === 'number' &&
+    typeof r.phase1 === 'object' &&
+    r.phase1 !== null &&
+    typeof r.phase2 === 'object' &&
+    r.phase2 !== null
+  );
 }
 
 function isLogEntry(v: unknown): v is SystemELogEntry {

@@ -9,7 +9,7 @@ export interface MarketContextInput {
   btcRegimeBias: 'bullish' | 'bearish' | 'neutral';
   /** ETH's own 4H trend — the secondary confirmation layer. */
   ethTrend: TrendAnalysis | undefined;
-  /** Fraction of the Top-20 universe (excluding BTC/ETH) whose 4H trend agrees with BTC's bias, or null if unavailable. */
+  /** Fraction of the Top-50 universe (excluding BTC/ETH) whose 4H trend agrees with BTC's bias, or null if unavailable. */
   breadthBullishSharePct: number | null;
   sourceTimestamp: number;
 }
@@ -18,7 +18,7 @@ export interface MarketContextInput {
  * Market-context is a Layer C category: it never independently creates a
  * LONG/SHORT bias for the *candidate symbol* — it only confirms, contradicts
  * or raises the confirmation bar. BTC leads, ETH confirms, breadth across
- * the Top-20 tells you whether it's a broad move or BTC/ETH-only. A weak or
+ * the Top-50 tells you whether it's a broad move or BTC/ETH-only. A weak or
  * contradicted market context is exactly the situation that should later
  * block an altcoin LONG unless exceptional relative strength is present —
  * that gating decision belongs to the thesis layer, not here; this module
@@ -61,11 +61,11 @@ export function evaluateMarketContext(input: MarketContextInput): CategoryEviden
 
   const supporting = [fact(`BTC regime bias: ${btcRegimeBias}.`, 'multi', sourceTimestamp)];
   if (ethTrend?.sufficientData) supporting.push(fact(`ETH 4H trend: ${ethTrend.classification} (${ethAgrees ? 'confirms' : 'does not confirm'} BTC).`, '4h', sourceTimestamp));
-  if (breadthBullishSharePct !== null) supporting.push(fact(`Top-20 breadth: ${(breadthBullishSharePct * 100).toFixed(0)}% trending with BTC's bias.`, '4h', sourceTimestamp));
+  if (breadthBullishSharePct !== null) supporting.push(fact(`Top-50 breadth: ${(breadthBullishSharePct * 100).toFixed(0)}% trending with BTC's bias.`, '4h', sourceTimestamp));
 
   const missingData: string[] = [];
   if (ethAgrees === null) missingData.push('ETH trend unavailable.');
-  if (breadthAgrees === null) missingData.push('Breadth across the Top-20 unavailable.');
+  if (breadthAgrees === null) missingData.push('Breadth across the Top-50 unavailable.');
 
   const confirmCount = [ethAgrees, breadthAgrees].filter((v) => v === true).length;
   const opposeCount = [ethAgrees, breadthAgrees].filter((v) => v === false).length;
@@ -79,7 +79,7 @@ export function evaluateMarketContext(input: MarketContextInput): CategoryEviden
     conclusion = 'neutral';
     supporting.push(
       fact(
-        `Both ETH and Top-20 breadth fail to confirm BTC's ${btcRegimeBias} bias — a weak/contradicted market context, not broad enough to lean on for an altcoin entry without exceptional relative strength.`,
+        `Both ETH and Top-50 breadth fail to confirm BTC's ${btcRegimeBias} bias — a weak/contradicted market context, not broad enough to lean on for an altcoin entry without exceptional relative strength.`,
         'multi',
         sourceTimestamp,
       ),

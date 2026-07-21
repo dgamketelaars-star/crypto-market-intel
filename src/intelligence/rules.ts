@@ -42,7 +42,7 @@ export const INTEL_RULES = {
     clusterTolerancePct: 0.3,
   },
   marketContext: {
-    /** How many of the Top-20 (excluding BTC/ETH) need to agree with BTC's regime bias to call the breadth "confirming". */
+    /** How many of the Top-50 (excluding BTC/ETH) need to agree with BTC's regime bias to call the breadth "confirming". */
     breadthConfirmMinShare: 0.55,
     breadthOpposeMinShare: 0.55,
   },

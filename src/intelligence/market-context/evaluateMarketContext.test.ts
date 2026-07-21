@@ -41,6 +41,6 @@ describe('evaluateMarketContext', () => {
   it('flags missing ETH and breadth data', () => {
     const result = evaluateMarketContext({ symbol: 'SOLUSDT', btcRegimeBias: 'bullish', ethTrend: undefined, breadthBullishSharePct: null, sourceTimestamp: 1 });
     expect(result.missingData).toContain('ETH trend unavailable.');
-    expect(result.missingData).toContain('Breadth across the Top-20 unavailable.');
+    expect(result.missingData).toContain('Breadth across the Top-50 unavailable.');
   });
 });

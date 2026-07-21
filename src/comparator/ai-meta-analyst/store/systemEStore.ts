@@ -8,16 +8,17 @@ import { toIndependentAnalysisSetup } from '../../independent-analysis/adapters/
 import { systemDStore } from '../../ichimoku-analysis/store/systemDStore';
 import { toIchimokuAnalysisSetup } from '../../ichimoku-analysis/adapters/toIchimokuAnalysisSetup';
 import { systemEApiKeyStore } from '../settings/apiKeyStore';
-import { selectSymbolsToAnalyze, type SymbolDirectionInput } from '../selection/selectSymbolsToAnalyze';
-import type { RawMarketSnapshot, SystemOutputSummary } from '../prompt/buildPrompt';
-import { runMetaAnalysis } from '../analysis/runMetaAnalysis';
-import { createSystemERecord, type SystemERecord } from '../records/systemERecord';
-import { createLogEntry, type SystemELogEntry } from '../logging/systemELog';
+import { selectSymbolsToAnalyze, computeSelectionSignature, type SymbolOpinionInput, type SystemOpinion, type SystemOpinionConfidence } from '../selection/selectSymbolsToAnalyze';
+import type { RawMarketSnapshot } from '../prompt/marketData';
+import type { SystemOutputSummary } from '../prompt/systemSummary';
+import { runPhase1Analysis, runPhase2Analysis } from '../analysis/runMetaAnalysis';
+import { createSystemERecord, type SystemERecord, type SystemETriggerType } from '../records/systemERecord';
+import { createSuccessLogEntry, createFailureLogEntry, type SystemELogEntry } from '../logging/systemELog';
 import { systemERecordPersistence, systemELogPersistence } from '../persistence/systemEPersistence';
 
 /** Own choice: far longer than A-D's 5s cadence — every call is real, billed API spend on the user's own key. */
 const RECOMPUTE_INTERVAL_MS = 20 * 60_000;
-/** Own choice: cap spend per cycle regardless of how many symbols qualify. */
+/** Own choice: cap spend per cycle regardless of how many symbols qualify. Each analysis is now two LLM calls (phase 1 + phase 2), so this caps at most 2 * MAX_SYMBOLS_PER_CYCLE calls per tick. */
 const MAX_SYMBOLS_PER_CYCLE = 3;
 /** Own choice: don't re-analyze the same symbol more often than this, even on manual trigger spam. */
 const MIN_RECHECK_INTERVAL_MS = 15 * 60_000;
@@ -34,78 +35,105 @@ export interface SystemEStoreState {
 
 type Listener = () => void;
 
-function buildSystemASummary(symbol: string): SystemOutputSummary {
+interface SystemInfo {
+  summary: SystemOutputSummary;
+  opinion: SystemOpinion | null;
+}
+
+function midpoint(zone: { low: number; high: number } | null | undefined): number | null {
+  return zone ? (zone.low + zone.high) / 2 : null;
+}
+
+function buildSystemA(symbol: string): SystemInfo {
   const setup = Object.values(setupStore.getState().setups).find((s) => s.symbol === symbol && OPEN_SETUP_STATUSES.includes(s.status));
-  if (!setup) return { systemId: 'A', systemName: 'Onze analist', hasSetup: false, reasoning: [], warnings: [] };
+  if (!setup) return { summary: { systemId: 'A', systemName: 'Onze analist', hasSetup: false, reasoning: [], warnings: [] }, opinion: null };
+  const confidenceMap: Record<string, SystemOpinionConfidence> = { Low: 'low', Medium: 'medium', High: 'high', 'Very high': 'high' };
+  const entryPrice = midpoint(setup.entryZone) ?? setup.trigger.price;
   return {
-    systemId: 'A',
-    systemName: 'Onze analist',
-    hasSetup: true,
-    direction: setup.direction,
-    status: setup.status,
-    confidenceOrStrength: `${setup.signalStrength} (risk: ${setup.risk})`,
-    entryDescription: setup.entryZone ? `${setup.entryZone.low}-${setup.entryZone.high}` : `trigger ${setup.trigger.price}`,
-    stopPrice: setup.invalidation.price,
-    targets: setup.targets.map((t) => t.price),
-    reasoning: setup.supporting.map((e) => e.detail),
-    warnings: setup.opposing.map((e) => e.detail),
+    summary: {
+      systemId: 'A',
+      systemName: 'Onze analist',
+      hasSetup: true,
+      direction: setup.direction,
+      status: setup.status,
+      confidenceOrStrength: `${setup.signalStrength} (risk: ${setup.risk})`,
+      entryDescription: setup.entryZone ? `${setup.entryZone.low}-${setup.entryZone.high}` : `trigger ${setup.trigger.price}`,
+      stopPrice: setup.invalidation.price,
+      targets: setup.targets.map((t) => t.price),
+      reasoning: setup.supporting.map((e) => e.detail),
+      warnings: setup.opposing.map((e) => e.detail),
+    },
+    opinion: { direction: setup.direction, confidence: confidenceMap[setup.signalStrength] ?? null, entryPrice, stopPrice: setup.invalidation.price },
   };
 }
 
-function buildSystemBSummary(symbol: string, now: number): SystemOutputSummary {
+function buildSystemB(symbol: string, now: number): SystemInfo {
   const setup = Object.values(systemBStore.getState().setups).find((s) => s.symbol === symbol && (s.status === 'entry_triggered' || s.status === 'active'));
-  if (!setup) return { systemId: 'B', systemName: 'Open-source model (Supertrend)', hasSetup: false, reasoning: [], warnings: [] };
+  if (!setup) return { summary: { systemId: 'B', systemName: 'Open-source model (Supertrend)', hasSetup: false, reasoning: [], warnings: [] }, opinion: null };
   const normalised = toNormalisedStrategySetup(setup, now);
+  const entryPrice = midpoint(normalised.entryZone) ?? normalised.triggerPrice ?? null;
   return {
-    systemId: 'B',
-    systemName: 'Open-source model (Supertrend)',
-    hasSetup: true,
-    direction: normalised.direction,
-    status: normalised.status,
-    confidenceOrStrength: undefined,
-    entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : `trigger ${normalised.triggerPrice ?? ''}`,
-    stopPrice: normalised.stopPrice ?? null,
-    targets: normalised.targets?.map((t: { price: number }) => t.price) ?? [],
-    reasoning: normalised.reasonSummary,
-    warnings: [],
+    summary: {
+      systemId: 'B',
+      systemName: 'Open-source model (Supertrend)',
+      hasSetup: true,
+      direction: normalised.direction,
+      status: normalised.status,
+      confidenceOrStrength: undefined,
+      entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : `trigger ${normalised.triggerPrice ?? ''}`,
+      stopPrice: normalised.stopPrice ?? null,
+      targets: normalised.targets?.map((t: { price: number }) => t.price) ?? [],
+      reasoning: normalised.reasonSummary,
+      warnings: [],
+    },
+    opinion: { direction: normalised.direction, confidence: null, entryPrice, stopPrice: normalised.stopPrice ?? null },
   };
 }
 
-function buildSystemCSummary(symbol: string): SystemOutputSummary {
+function buildSystemC(symbol: string): SystemInfo {
   const setup = Object.values(systemCStore.getState().setups).find((s) => s.symbol === symbol && (s.status === 'entry_zone_now' || s.status === 'active'));
-  if (!setup) return { systemId: 'C', systemName: 'Onafhankelijke analyse (structuur/liquidity)', hasSetup: false, reasoning: [], warnings: [] };
+  if (!setup) return { summary: { systemId: 'C', systemName: 'Onafhankelijke analyse (structuur/liquidity)', hasSetup: false, reasoning: [], warnings: [] }, opinion: null };
   const normalised = toIndependentAnalysisSetup(setup);
+  const entryPrice = midpoint(normalised.entryZone);
   return {
-    systemId: 'C',
-    systemName: 'Onafhankelijke analyse (structuur/liquidity)',
-    hasSetup: true,
-    direction: normalised.direction,
-    status: normalised.status,
-    confidenceOrStrength: undefined,
-    entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : undefined,
-    stopPrice: normalised.stopPrice ?? null,
-    targets: normalised.targets?.map((t) => t.price) ?? [],
-    reasoning: normalised.supportingObservations,
-    warnings: normalised.opposingObservations,
+    summary: {
+      systemId: 'C',
+      systemName: 'Onafhankelijke analyse (structuur/liquidity)',
+      hasSetup: true,
+      direction: normalised.direction,
+      status: normalised.status,
+      confidenceOrStrength: undefined,
+      entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : undefined,
+      stopPrice: normalised.stopPrice ?? null,
+      targets: normalised.targets?.map((t) => t.price) ?? [],
+      reasoning: normalised.supportingObservations,
+      warnings: normalised.opposingObservations,
+    },
+    opinion: { direction: normalised.direction, confidence: null, entryPrice, stopPrice: normalised.stopPrice ?? null },
   };
 }
 
-function buildSystemDSummary(symbol: string): SystemOutputSummary {
+function buildSystemD(symbol: string): SystemInfo {
   const setup = Object.values(systemDStore.getState().setups).find((s) => s.symbol === symbol && (s.status === 'entry_zone_now' || s.status === 'active'));
-  if (!setup) return { systemId: 'D', systemName: 'Ichimoku Analysis', hasSetup: false, reasoning: [], warnings: [] };
+  if (!setup) return { summary: { systemId: 'D', systemName: 'Ichimoku Analysis', hasSetup: false, reasoning: [], warnings: [] }, opinion: null };
   const normalised = toIchimokuAnalysisSetup(setup);
+  const confidenceMap: Record<string, SystemOpinionConfidence> = { strong: 'high', moderate: 'medium' };
+  const entryPrice = midpoint(normalised.entryZone);
   return {
-    systemId: 'D',
-    systemName: 'Ichimoku Analysis',
-    hasSetup: true,
-    direction: normalised.direction,
-    status: normalised.status,
-    confidenceOrStrength: normalised.confidence,
-    entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : undefined,
-    stopPrice: normalised.stopPrice ?? null,
-    targets: normalised.targets?.map((t) => t.price) ?? [],
-    reasoning: normalised.supportingObservations,
-    warnings: normalised.opposingObservations,
+    summary: {
+      systemId: 'D',
+      systemName: 'Ichimoku Analysis',
+      hasSetup: true,
+      direction: normalised.direction,
+      status: normalised.status,
+      confidenceOrStrength: normalised.confidence,
+      entryDescription: normalised.entryZone ? `${normalised.entryZone.low}-${normalised.entryZone.high}` : undefined,
+      stopPrice: normalised.stopPrice ?? null,
+      targets: normalised.targets?.map((t) => t.price) ?? [],
+      reasoning: normalised.supportingObservations,
+      warnings: normalised.opposingObservations,
+    },
+    opinion: { direction: normalised.direction, confidence: confidenceMap[normalised.confidence] ?? null, entryPrice, stopPrice: normalised.stopPrice ?? null },
   };
 }
 
@@ -129,10 +157,12 @@ function buildMarketSnapshot(symbol: string): RawMarketSnapshot | null {
 
 /**
  * Orchestration store for System E. Deliberately NOT built on the same
- * 5-second recompute pattern as A-D's stores — every recompute here is a
- * real, billed LLM call, so this runs on a long interval and only on a
- * capped, selected subset of symbols. Reads A-D's PUBLISHED OUTPUT via their
- * public stores/adapters only — never their internal evidence/signal logic.
+ * 5-second recompute pattern as A-D's stores — every recompute here is one
+ * or two real, billed LLM calls, so this runs on a long interval and only
+ * on a capped, selected subset of symbols. Reads A-D's PUBLISHED OUTPUT via
+ * their public stores/adapters only — never their internal evidence/signal
+ * logic. Runs phase 1 (independent) fully before phase 2 ever sees A-D's
+ * output — see analysis/runMetaAnalysis.ts and prompt/phase1Prompt.ts.
  */
 export class SystemEStore {
   private state: SystemEStoreState = { records: {}, log: [], lastEvaluatedAt: null, analyzing: new Set() };
@@ -142,6 +172,8 @@ export class SystemEStore {
   private recomputeTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   private lastAnalyzedAt: Record<string, number> = {};
+  /** In-memory only, soft heuristic — see selection/selectSymbolsToAnalyze.ts#computeSelectionSignature. Resets on reload, which is fine: a fresh page load re-evaluating once more is a non-issue. */
+  private lastAnalyzedSignature: Record<string, string> = {};
 
   getState = (): SystemEStoreState => this.state;
 
@@ -190,20 +222,20 @@ export class SystemEStore {
     this.recomputeTimer = null;
   }
 
-  private gatherSummaries(symbol: string, now: number): SystemOutputSummary[] {
-    return [buildSystemASummary(symbol), buildSystemBSummary(symbol, now), buildSystemCSummary(symbol), buildSystemDSummary(symbol)];
+  private gatherSystemInfo(symbol: string, now: number): SystemInfo[] {
+    return [buildSystemA(symbol), buildSystemB(symbol, now), buildSystemC(symbol), buildSystemD(symbol)];
   }
 
-  private buildDirectionInputs(now: number): SymbolDirectionInput[] {
+  private buildOpinionInputs(now: number): SymbolOpinionInput[] {
     const { universe } = marketDataStore.getState();
     return universe.map(({ symbol }) => {
-      const summaries = this.gatherSummaries(symbol, now);
-      const directions = summaries.filter((s): s is SystemOutputSummary & { direction: 'LONG' | 'SHORT' } => s.hasSetup && s.direction != null).map((s) => s.direction);
-      return { symbol, directions };
+      const infos = this.gatherSystemInfo(symbol, now);
+      const opinions = infos.filter((i): i is SystemInfo & { opinion: SystemOpinion } => i.opinion !== null).map((i) => i.opinion);
+      return { symbol, opinions };
     });
   }
 
-  private async analyzeSymbol(symbol: string, reason: 'strong_consensus' | 'disagreement', now: number): Promise<void> {
+  private async analyzeSymbol(symbol: string, triggerType: SystemETriggerType, selectionReason: SystemERecord['selectionReason'], now: number): Promise<void> {
     const provider = systemEApiKeyStore.getProvider();
     const apiKey = systemEApiKeyStore.getApiKey(provider);
     if (!apiKey) return;
@@ -211,25 +243,60 @@ export class SystemEStore {
     if (!market) return;
 
     this.setState({ analyzing: new Set(this.state.analyzing).add(symbol) });
-    const summaries = this.gatherSummaries(symbol, now);
+    const infos = this.gatherSystemInfo(symbol, now);
+    const summaries = infos.map((i) => i.summary);
     const model = systemEApiKeyStore.getModel(provider);
-    const outcome = await runMetaAnalysis({ provider, apiKey, model, symbol, systemSummaries: summaries, market });
+
+    const phase1Outcome = await runPhase1Analysis({ provider, apiKey, model, market });
+
+    if (!phase1Outcome.ok) {
+      const stillAnalyzing = new Set(this.state.analyzing);
+      stillAnalyzing.delete(symbol);
+      const nextLog = systemELogPersistence.append(
+        createFailureLogEntry({ symbol, now, triggerType, selectionReason, errorPhase: 'phase1', errorType: phase1Outcome.errorType, errorMessage: phase1Outcome.errorMessage, provider, model }),
+      );
+      this.lastAnalyzedAt[symbol] = now;
+      this.setState({ log: nextLog, analyzing: stillAnalyzing });
+      return;
+    }
+
+    const phase2Outcome = await runPhase2Analysis({ provider, apiKey, model, symbol, phase1: phase1Outcome.result, systemSummaries: summaries });
 
     const stillAnalyzing = new Set(this.state.analyzing);
     stillAnalyzing.delete(symbol);
 
-    if (outcome.ok) {
-      const record = createSystemERecord(symbol, outcome.model, reason, summaries, outcome.result, outcome.usage, now);
-      const nextRecords = { ...this.state.records, [symbol]: record };
-      const nextLog = systemELogPersistence.append(createLogEntry(symbol, now, { success: true, model: outcome.model, ...outcome.usage }));
-      this.lastAnalyzedAt[symbol] = now;
-      this.setState({ records: nextRecords, log: nextLog, analyzing: stillAnalyzing });
-      systemERecordPersistence.save(Object.values(nextRecords));
-    } else {
-      const nextLog = systemELogPersistence.append(createLogEntry(symbol, now, { success: false, errorType: outcome.errorType, errorMessage: outcome.errorMessage }));
+    if (!phase2Outcome.ok) {
+      const nextLog = systemELogPersistence.append(
+        createFailureLogEntry({
+          symbol,
+          now,
+          triggerType,
+          selectionReason,
+          errorPhase: 'phase2',
+          errorType: phase2Outcome.errorType,
+          errorMessage: phase2Outcome.errorMessage,
+          provider,
+          model,
+          phase1Usage: phase1Outcome.usage,
+          initialDecision: phase1Outcome.result.decision,
+          initialConfidence: phase1Outcome.result.confidence,
+          initialSetupQuality: phase1Outcome.result.setupQuality,
+        }),
+      );
       this.lastAnalyzedAt[symbol] = now;
       this.setState({ log: nextLog, analyzing: stillAnalyzing });
+      return;
     }
+
+    const record = createSystemERecord(symbol, provider, model, triggerType, selectionReason, summaries, phase1Outcome.result, phase2Outcome.result, phase1Outcome.usage, phase2Outcome.usage, now);
+    const nextRecords = { ...this.state.records, [symbol]: record };
+    const nextLog = systemELogPersistence.append(createSuccessLogEntry(record));
+    this.lastAnalyzedAt[symbol] = now;
+    const price = market.price;
+    const opinionInput = infos.filter((i): i is SystemInfo & { opinion: SystemOpinion } => i.opinion !== null).map((i) => i.opinion);
+    this.lastAnalyzedSignature[symbol] = computeSelectionSignature({ symbol, opinions: opinionInput }, price);
+    this.setState({ records: nextRecords, log: nextLog, analyzing: stillAnalyzing });
+    systemERecordPersistence.save(Object.values(nextRecords));
   }
 
   private async tick(): Promise<void> {
@@ -237,28 +304,35 @@ export class SystemEStore {
     this.setState({ lastEvaluatedAt: now });
     if (!systemEApiKeyStore.hasApiKey()) return;
 
-    const inputs = this.buildDirectionInputs(now);
+    const inputs = this.buildOpinionInputs(now);
     const selected = selectSymbolsToAnalyze(inputs, MAX_SYMBOLS_PER_CYCLE);
     for (const { symbol, reason } of selected) {
       const last = this.lastAnalyzedAt[symbol];
       if (last && now - last < MIN_RECHECK_INTERVAL_MS) continue;
-      await this.analyzeSymbol(symbol, reason, now);
+
+      const input = inputs.find((i) => i.symbol === symbol);
+      const marketData = marketDataStore.getState().bySymbol[symbol];
+      if (input && marketData?.ticker) {
+        const signature = computeSelectionSignature(input, marketData.ticker.lastPrice);
+        if (this.lastAnalyzedSignature[symbol] === signature) continue; // relevant data barely changed since last analysis — skip the spend
+      }
+
+      await this.analyzeSymbol(symbol, 'automatic', reason, now);
     }
   }
 
-  /** Manual on-demand trigger (e.g. a UI button), bypassing the selection filter but still respecting the recheck cooldown. */
+  /** Manual on-demand trigger (e.g. a UI button) — works for ANY symbol in the shared universe, not just automatically-selected candidates, bypassing the selection filter and the unchanged-data skip, but still respecting the recheck cooldown so repeated clicks can't spam the API. */
   async analyzeSymbolNow(symbol: string): Promise<void> {
     const now = Date.now();
     const last = this.lastAnalyzedAt[symbol];
     if (last && now - last < MIN_RECHECK_INTERVAL_MS) return;
-    const inputs = this.buildDirectionInputs(now).find((i) => i.symbol === symbol);
-    const reason: 'strong_consensus' | 'disagreement' = inputs && inputs.directions.length >= 2 && inputs.directions.every((d) => d === inputs.directions[0]) ? 'strong_consensus' : 'disagreement';
-    await this.analyzeSymbol(symbol, reason, now);
+    await this.analyzeSymbol(symbol, 'manual', null, now);
   }
 
   reset(): void {
     this.state = { records: {}, log: [], lastEvaluatedAt: null, analyzing: new Set() };
     this.lastAnalyzedAt = {};
+    this.lastAnalyzedSignature = {};
     systemERecordPersistence.clear();
     systemELogPersistence.clear();
     this.listeners.forEach((listener) => listener());

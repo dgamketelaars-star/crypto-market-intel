@@ -105,7 +105,7 @@ export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups:
 }
 
 /**
- * Applied to symbols that fell out of the dynamic Top-20 universe — no
+ * Applied to symbols that fell out of the dynamic Top-50 universe — no
  * fresh evaluation is possible without live data for them. A still-forming
  * setup gets the normal age-based expiry check. An ACTIVE setup must be
  * force-closed here, not silently left alone: once its symbol drops out of
@@ -121,7 +121,7 @@ export function orchestrateSymbolSetup(input: OrchestrateSymbolInput): { setups:
 export function expireVanishedUniverseSetup(setup: GeneratedSetup, now: number, lastKnownPrice: number | null): GeneratedSetup | null {
   if (!OPEN_SETUP_STATUSES.includes(setup.status)) return null;
   if (setup.status === 'active') {
-    return closeOpenSetup(setup, 'expired', 'Symbool viel uit de gevolgde Top-20 universe — live tracking kon niet worden voortgezet.', now, lastKnownPrice);
+    return closeOpenSetup(setup, 'expired', 'Symbool viel uit de gevolgde Top-50 universe — live tracking kon niet worden voortgezet.', now, lastKnownPrice);
   }
   return checkExpiry(setup, now);
 }

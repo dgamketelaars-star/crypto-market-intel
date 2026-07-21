@@ -47,7 +47,7 @@ export function explainClose(reason: SystemBSetupState['closedReason']): string 
     case 'signal_exit':
       return 'Middelste tegengestelde Supertrend-instantie draaide om — signaal-exit.';
     case 'vanished':
-      return 'Symbool viel uit de gevolgde Top-20 universe — tracking kon niet worden voortgezet.';
+      return 'Symbool viel uit de gevolgde Top-50 universe — tracking kon niet worden voortgezet.';
     default:
       return 'Gesloten.';
   }

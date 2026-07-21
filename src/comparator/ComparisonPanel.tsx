@@ -16,6 +16,7 @@ interface DirectionalCell {
 interface EMetaCell {
   finalDecision: 'LONG' | 'SHORT' | 'WAIT' | 'NO_TRADE';
   confidence: string;
+  setupQuality: string;
 }
 
 interface ComparisonRow {
@@ -53,7 +54,9 @@ function MetaDecisionCell({ decision }: { decision: EMetaCell | null }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <Badge tone={tone}>{decision.finalDecision}</Badge>
-      <span className="text-slate-500">{decision.confidence}</span>
+      <span className="text-slate-500">
+        {decision.setupQuality} · {decision.confidence}
+      </span>
     </span>
   );
 }
@@ -87,7 +90,7 @@ export function ComparisonPanel() {
       b: openB ? { direction: openB.direction, status: openB.status } : null,
       c: openC ? { direction: openC.direction, status: openC.status } : null,
       d: openD ? { direction: openD.direction, status: openD.status } : null,
-      e: recordE ? { finalDecision: recordE.result.finalDecision, confidence: recordE.result.confidence } : null,
+      e: recordE ? { finalDecision: recordE.phase2.finalDecision, confidence: recordE.phase2.finalConfidence, setupQuality: recordE.phase2.finalSetupQuality } : null,
     };
   });
 

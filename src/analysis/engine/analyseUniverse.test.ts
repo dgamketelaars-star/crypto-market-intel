@@ -21,7 +21,7 @@ function marketData(symbol: string, closes: number[], quoteVolume?: number): Sym
   };
 }
 
-describe('analyseUniverse — dynamic top-20 membership', () => {
+describe('analyseUniverse — dynamic top-50 membership', () => {
   it('only analyses symbols present in both the universe list and bySymbol data', () => {
     const universe = [symbolDef('AAAUSDT'), symbolDef('BBBUSDT')];
     const bySymbol = {

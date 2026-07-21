@@ -31,20 +31,30 @@ import type {
   OpenInterestData,
   TickerData,
 } from '../services/binance/types';
-import { BinanceMarketStream } from '../services/binance/websocket';
+import { ShardedBinanceMarketStream } from '../services/binance/websocket';
 import { mapWithConcurrency } from '../utils/concurrency';
 import { OFFLINE_AFTER_MS, STALE_AFTER_MS } from '../utils/freshness';
+import { ALWAYS_INCLUDED_SYMBOLS, selectTopUniverse, TOP_UNIVERSE_SIZE } from './universeSelection';
 
+export { ALWAYS_INCLUDED_SYMBOLS, TOP_UNIVERSE_SIZE };
 export const CANDLE_INTERVALS: CandleInterval[] = ['15m', '1h', '4h', '1d'];
-export const TOP_UNIVERSE_SIZE = 20;
-export const ALWAYS_INCLUDED_SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
 
+/**
+ * How often the shared universe re-ranks and refreshes. 5 minutes is a
+ * deliberate choice: short enough that the tracked set stays representative
+ * of genuinely liquid pairs within the trading day, long enough that it
+ * doesn't hammer the exchangeInfo/24hr-ticker/premiumIndex REST endpoints on
+ * every render or push constant WebSocket re-subscriptions. Combined with
+ * the hysteresis buffer in universeSelection.ts, this keeps the list both
+ * current and stable rather than needing per-minute updates.
+ */
 const UNIVERSE_REFRESH_MS = 5 * 60_000;
 const OPEN_INTEREST_POLL_MS = 60_000;
 const CONNECTION_CHECK_MS = 5_000;
 /** 250 candles keeps EMA200 (analysis layer) properly converged instead of "insufficient data". */
 const CANDLE_LIMIT = 250;
-const FETCH_CONCURRENCY = 4;
+/** Raised from 4 (top-20 era) to 6 for the top-50 universe — still comfortably inside Binance's per-minute REST weight budget (klines/openInterest/longShortRatio are all low-weight endpoints), and mapWithConcurrency already isolates one symbol's failure from the rest of the batch. */
+const FETCH_CONCURRENCY = 6;
 /** Grace window so a React StrictMode dev double-mount doesn't tear down and reopen the socket. */
 const TEARDOWN_GRACE_MS = 300;
 /** Rolling per-symbol liquidation buffer — a "recent liquidation clustering" read needs recency, not full history. */
@@ -103,9 +113,12 @@ class MarketDataStore {
   private disconnectedSince: number | null = Date.now();
   private openedAt: number | null = null;
 
-  private readonly stream = new BinanceMarketStream(
+  private readonly stream = new ShardedBinanceMarketStream(
     (streamName, data) => this.handleStreamMessage(streamName, data),
     (status) => this.handleWsStatus(status),
+    // +15 headroom over TOP_UNIVERSE_SIZE absorbs the hysteresis buffer's occasional overshoot (see universeSelection.ts)
+    // so a shard never creeps up toward Binance's ~200-stream-per-connection limit as the universe floats above 50.
+    ShardedBinanceMarketStream.shardCountFor((TOP_UNIVERSE_SIZE + 15) * (2 + CANDLE_INTERVALS.length)),
   );
 
   getState = (): MarketDataState => this.state;
@@ -275,34 +288,6 @@ class MarketDataStore {
     return streams;
   }
 
-  /** Ranks the eligible universe by 24h quote volume, keeps the top N, and
-   * always folds in BTCUSDT/ETHUSDT for global market context. */
-  private selectUniverse(candidates: FuturesSymbol[], tickers: TickerData[]): FuturesSymbol[] {
-    const candidateMap = new Map(candidates.map((s) => [s.symbol, s]));
-    const eligibleTickers = tickers.filter((t) => candidateMap.has(t.symbol));
-    const ranked = [...eligibleTickers].sort((a, b) => b.quoteVolume - a.quoteVolume);
-    const rankIndex = new Map(ranked.map((t, i) => [t.symbol, i]));
-
-    const finalSet = new Set(ranked.slice(0, TOP_UNIVERSE_SIZE).map((t) => t.symbol));
-    for (const forced of ALWAYS_INCLUDED_SYMBOLS) {
-      if (candidateMap.has(forced)) finalSet.add(forced);
-    }
-
-    let finalSymbols = [...finalSet];
-    if (finalSymbols.length > TOP_UNIVERSE_SIZE) {
-      finalSymbols = finalSymbols
-        .sort((a, b) => {
-          const aForced = ALWAYS_INCLUDED_SYMBOLS.includes(a);
-          const bForced = ALWAYS_INCLUDED_SYMBOLS.includes(b);
-          if (aForced !== bForced) return aForced ? -1 : 1;
-          return (rankIndex.get(a) ?? Infinity) - (rankIndex.get(b) ?? Infinity);
-        })
-        .slice(0, TOP_UNIVERSE_SIZE);
-    }
-
-    return finalSymbols.map((symbol) => candidateMap.get(symbol)).filter((s): s is FuturesSymbol => Boolean(s));
-  }
-
   private async refreshUniverse(): Promise<void> {
     this.setState({ universeLoading: this.state.universe.length === 0, error: null });
     try {
@@ -312,8 +297,8 @@ class MarketDataStore {
         fetchPremiumIndexAll(),
       ]);
 
-      const universe = this.selectUniverse(candidates, tickers);
       const previousSymbols = new Set(this.state.universe.map((s) => s.symbol));
+      const universe = selectTopUniverse(candidates, tickers, previousSymbols);
       const newSymbols = universe.filter((s) => !previousSymbols.has(s.symbol));
 
       const tickerBySymbol = new Map(tickers.map((t) => [t.symbol, t]));

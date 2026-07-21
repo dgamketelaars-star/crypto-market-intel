@@ -176,7 +176,7 @@ export class SetupStore {
       for (const setup of updated) nextSetups[setup.id] = setup;
     }
 
-    // Symbols that fell out of the dynamic top-20 no longer get fresh analysis —
+    // Symbols that fell out of the dynamic top-50 no longer get fresh analysis —
     // only apply the age-based expiry check to their still-open setups.
     for (const [symbol, setups] of existingBySymbol) {
       if (universeSymbols.has(symbol)) continue;

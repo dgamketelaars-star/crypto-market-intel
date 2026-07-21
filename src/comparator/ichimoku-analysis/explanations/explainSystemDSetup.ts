@@ -47,7 +47,7 @@ export function explainClose(reason: SystemDSetupState['closedReason']): string 
     case 'target':
       return 'Kumo-dikte-doel bereikt.';
     case 'vanished':
-      return 'Symbool viel uit de gevolgde Top-20 universe — tracking kon niet worden voortgezet.';
+      return 'Symbool viel uit de gevolgde Top-50 universe — tracking kon niet worden voortgezet.';
     default:
       return 'Gesloten.';
   }

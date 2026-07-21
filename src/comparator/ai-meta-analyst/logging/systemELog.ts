@@ -1,20 +1,39 @@
 /**
- * "Eigen logging" requirement: System E spends real money via the user's own
- * API key, so every call — success or failure — is logged with an estimated
- * cost, visible in the UI. Pricing is a point-in-time estimate (see
+ * "Eigen logging" requirement (Deel 8): every analysis — success or
+ * failure, automatic or manual — is logged with enough structure to later
+ * study System E's behaviour: what it concluded independently, what it
+ * concluded after reading A-D, whether that changed, why it was selected,
+ * and what it cost. Pricing is a point-in-time estimate (see
  * PRICING_USD_PER_MILLION_TOKENS) for transparency only, not a billing
- * source of truth — check the Anthropic Console for actual spend.
+ * source of truth — check the provider's own console for actual spend.
  */
-import type { SystemEModel } from '../settings/apiKeyStore';
+import type { SystemEModel, SystemEProvider } from '../settings/apiKeyStore';
+import type { SelectionReason } from '../selection/selectSymbolsToAnalyze';
+import type { SystemEDecision, SystemEConfidence } from '../prompt/phase1Schema';
+import type { SetupQuality } from '../prompt/setupQuality';
+import type { SystemERecord, SystemETriggerType } from '../records/systemERecord';
+import { decisionChangedAfterReadingAD } from '../records/systemERecord';
+import type { RunMetaAnalysisUsage } from '../analysis/runMetaAnalysis';
 
 export interface SystemELogEntry {
   id: string;
   timestamp: number;
   symbol: string;
   success: boolean;
+  triggerType: SystemETriggerType;
+  selectionReason?: SelectionReason | null;
+  errorPhase?: 'phase1' | 'phase2';
   errorType?: string;
   errorMessage?: string;
+  provider?: SystemEProvider;
   model?: string;
+  initialDecision?: SystemEDecision;
+  initialConfidence?: SystemEConfidence;
+  initialSetupQuality?: SetupQuality;
+  finalDecision?: SystemEDecision;
+  finalConfidence?: SystemEConfidence;
+  finalSetupQuality?: SetupQuality;
+  decisionChangedAfterAD?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadInputTokens?: number;
@@ -47,27 +66,80 @@ export function estimateCostUsd(model: string, inputTokens: number, outputTokens
   return inputCost + outputCost + cacheReadCost + cacheCreationCost;
 }
 
-export function createLogEntry(symbol: string, now: number, outcome: { success: true; model: string; inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number } | { success: false; errorType: string; errorMessage: string }): SystemELogEntry {
-  if (outcome.success) {
-    return {
-      id: `${symbol}-log-${now}`,
-      timestamp: now,
-      symbol,
-      success: true,
-      model: outcome.model,
-      inputTokens: outcome.inputTokens,
-      outputTokens: outcome.outputTokens,
-      cacheReadInputTokens: outcome.cacheReadInputTokens,
-      cacheCreationInputTokens: outcome.cacheCreationInputTokens,
-      estimatedCostUsd: estimateCostUsd(outcome.model, outcome.inputTokens, outcome.outputTokens, outcome.cacheReadInputTokens, outcome.cacheCreationInputTokens),
-    };
-  }
+function sumUsage(a: RunMetaAnalysisUsage, b: RunMetaAnalysisUsage): RunMetaAnalysisUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadInputTokens: a.cacheReadInputTokens + b.cacheReadInputTokens,
+    cacheCreationInputTokens: a.cacheCreationInputTokens + b.cacheCreationInputTokens,
+  };
+}
+
+/** Successful two-phase analysis -> one combined log entry (token/cost totals across both calls). */
+export function createSuccessLogEntry(record: SystemERecord): SystemELogEntry {
+  const usage = sumUsage(record.phase1Usage, record.phase2Usage);
+  return {
+    id: record.id,
+    timestamp: record.generatedAt,
+    symbol: record.symbol,
+    success: true,
+    triggerType: record.triggerType,
+    selectionReason: record.selectionReason,
+    provider: record.provider,
+    model: record.model,
+    initialDecision: record.phase1.decision,
+    initialConfidence: record.phase1.confidence,
+    initialSetupQuality: record.phase1.setupQuality,
+    finalDecision: record.phase2.finalDecision,
+    finalConfidence: record.phase2.finalConfidence,
+    finalSetupQuality: record.phase2.finalSetupQuality,
+    decisionChangedAfterAD: decisionChangedAfterReadingAD(record),
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadInputTokens: usage.cacheReadInputTokens,
+    cacheCreationInputTokens: usage.cacheCreationInputTokens,
+    estimatedCostUsd: estimateCostUsd(record.model, usage.inputTokens, usage.outputTokens, usage.cacheReadInputTokens, usage.cacheCreationInputTokens),
+  };
+}
+
+export interface FailureLogEntryOptions {
+  symbol: string;
+  now: number;
+  triggerType: SystemETriggerType;
+  selectionReason: SelectionReason | null;
+  errorPhase: 'phase1' | 'phase2';
+  errorType: string;
+  errorMessage: string;
+  provider?: SystemEProvider;
+  model?: string;
+  /** Only set when phase 1 succeeded and phase 2 then failed — preserves the independent conclusion instead of losing it entirely. */
+  phase1Usage?: RunMetaAnalysisUsage;
+  initialDecision?: SystemEDecision;
+  initialConfidence?: SystemEConfidence;
+  initialSetupQuality?: SetupQuality;
+}
+
+export function createFailureLogEntry(options: FailureLogEntryOptions): SystemELogEntry {
+  const { symbol, now, triggerType, selectionReason, errorPhase, errorType, errorMessage, provider, model, phase1Usage, initialDecision, initialConfidence, initialSetupQuality } = options;
   return {
     id: `${symbol}-log-${now}`,
     timestamp: now,
     symbol,
     success: false,
-    errorType: outcome.errorType,
-    errorMessage: outcome.errorMessage,
+    triggerType,
+    selectionReason,
+    errorPhase,
+    errorType,
+    errorMessage,
+    provider,
+    model,
+    initialDecision,
+    initialConfidence,
+    initialSetupQuality,
+    inputTokens: phase1Usage?.inputTokens,
+    outputTokens: phase1Usage?.outputTokens,
+    cacheReadInputTokens: phase1Usage?.cacheReadInputTokens,
+    cacheCreationInputTokens: phase1Usage?.cacheCreationInputTokens,
+    estimatedCostUsd: phase1Usage && model ? estimateCostUsd(model, phase1Usage.inputTokens, phase1Usage.outputTokens, phase1Usage.cacheReadInputTokens, phase1Usage.cacheCreationInputTokens) : undefined,
   };
 }

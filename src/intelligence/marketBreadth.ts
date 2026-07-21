@@ -1,6 +1,6 @@
 import type { SymbolAnalysis } from '../analysis/engine/types';
 
-/** Fraction of the Top-20 universe (excluding BTC/ETH) whose 4H trend is a decisive uptrend, among symbols with a decisive (uptrend/downtrend) read. */
+/** Fraction of the Top-50 universe (excluding BTC/ETH) whose 4H trend is a decisive uptrend, among symbols with a decisive (uptrend/downtrend) read. */
 export function computeBreadthBullishSharePct(bySymbol: Record<string, SymbolAnalysis>): number | null {
   const decisive = Object.entries(bySymbol)
     .filter(([symbol]) => symbol !== 'BTCUSDT' && symbol !== 'ETHUSDT')

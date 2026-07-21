@@ -155,7 +155,7 @@ describe('expireVanishedUniverseSetup', () => {
     expect(result!.status).toBe('expired');
     expect(result!.closedReason).toBe('expired');
     expect(result!.closedPrice).toBe(103.5);
-    expect(result!.lifecycle.some((e) => e.detail.includes('Top-20'))).toBe(true);
+    expect(result!.lifecycle.some((e) => e.detail.includes('Top-50'))).toBe(true);
   });
 
   it('records a null closedPrice when no last-known price is available for the vanished symbol', () => {
